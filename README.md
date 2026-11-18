@@ -78,9 +78,9 @@ Connect to the server (the provider shows you how, usually "Console" in their we
 curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
 sudo apt-get install -y nodejs git
 
-# download pump-scout
-git clone https://github.com/gsohoax-ux/fewandchsn-theme.git pump-scout
-cd pump-scout
+# download the memecoin bot
+git clone https://github.com/gsohoax-ux/memecoin-bot.git memecoin-bot
+cd memecoin-bot
 git checkout claude/meme-coin-trading-bot-s5ozeg
 npm install
 
