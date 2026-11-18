@@ -24,6 +24,11 @@ export const config = {
   heliusConcurrency: num('HELIUS_CONCURRENCY', 4),
 
   // Alerts
+  ntfyServer: env('NTFY_SERVER', 'https://ntfy.sh'),
+  ntfyTopic: env('NTFY_TOPIC'),
+  ntfyToken: env('NTFY_TOKEN'),
+  ntfyDisabled: env('NTFY_DISABLED') === '1',
+  dashboardUrl: env('DASHBOARD_URL'),
   telegramToken: env('TELEGRAM_BOT_TOKEN'),
   telegramChatId: env('TELEGRAM_CHAT_ID'),
   padreUrlTemplate: env('PADRE_URL_TEMPLATE'),

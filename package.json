@@ -1,7 +1,7 @@
 {
   "name": "pump-scout",
   "version": "0.1.0",
-  "description": "Pump.fun coin scout: bundle/safety checks, narrative + momentum scoring, Telegram alerts and a live dashboard. Read-only - never touches your wallet.",
+  "description": "Pump.fun coin scout: bundle/safety checks, narrative + momentum scoring, phone alerts (ntfy) and a live dashboard. Read-only - never touches your wallet.",
   "type": "module",
   "private": true,
   "engines": { "node": ">=22.13" },

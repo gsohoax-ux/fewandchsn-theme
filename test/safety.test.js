@@ -170,3 +170,22 @@ test('store tracks dev launches, social reuse and alert outcomes', () => {
   assert.equal(s.alerts, 1);
   assert.equal(s.hit2x, 100);
 });
+
+test('ntfy alert payload has title, CA, tap link and buttons', async () => {
+  const { Ntfy } = await import('../src/notify.js');
+  const { alertNotification } = await import('../src/score.js');
+  const coin = makeCoin();
+  const r = { score: 78, light: '🟢',
+    safety: { verdict: 'SAFE', score: 90, flags: [{ level: 'ok', text: 'No bundle at launch' }] },
+    narrative: { score: 70, theme: 'hamster', summary: 'fits meta', redFlags: [] },
+    momentum: { score: 75, holders: 40, progressPerMin: 5, buySellRatio: 2, uniqueBuyers2m: 20 } };
+  const n = alertNotification(coin, r, 'fresh', { padreTemplate: 'https://padre.example/{mint}', dashboardUrl: 'http://d' });
+  assert.equal(n.title, '🟢 $TST 78/100 · FRESH');
+  assert.ok(n.message.endsWith('CA: MINT'));
+  assert.equal(n.click, 'https://padre.example/MINT');
+  assert.equal(n.priority, 5);
+  const p = new Ntfy({ topic: 'secret' }).payload(n);
+  assert.equal(p.topic, 'secret');
+  assert.deepEqual(p.actions.map((a) => a.label), ['Padre', 'pump.fun', 'Dashboard']);
+  assert.ok(p.actions.every((a) => a.action === 'view'));
+});

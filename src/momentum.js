@@ -14,7 +14,7 @@ export function analyzeMomentum(coin, now = Date.now(), smartWallets = new Set()
   const ratio = sellSol > 0 ? buySol / sellSol : buySol > 0 ? 5 : 0;
 
   const age = coin.ageSec(now);
-  const windowMin = Math.min(2, Math.max(age / 60, 0.25));
+  const windowMin = Math.min(2, Math.max(age / 60, 1)); // never extrapolate from < 1 min
   const progressPerMin = (coin.progress - coin.progressAt(now - windowMin * 60_000)) / windowMin;
 
   // Wash / bot volume: wallets that both bought and sold in the window

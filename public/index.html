@@ -110,7 +110,7 @@ function render() {
     pill(s.feedConnected ? '● Feed live' : '○ Feed offline', s.feedConnected) +
     pill(`Helius ${s.helius ? 'on' : 'off'}`, s.helius, 'On-chain bundle & funding tracing') +
     pill(`AI ${s.ai.startsWith('claude') ? 'on' : 'off'}`, s.ai.startsWith('claude'), s.ai) +
-    pill(`Telegram ${s.telegram ? 'on' : 'off'}`, s.telegram) +
+    pill(`Alerts: ${s.notify.length ? s.notify.join(' + ') : 'off'}`, s.notify.length > 0) +
     (s.paused ? '<span class="pill off">Alerts paused</span>' : '');
   const st = state.stats;
   $('stats').innerHTML = [

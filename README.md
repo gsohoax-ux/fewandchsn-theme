@@ -1,7 +1,7 @@
 # pump-scout
 
 A **read-only** Pump.fun scout. It watches every new coin, scores the ones that get traction, and
-sends the best to your **Telegram** and a **live dashboard**. Then you paste the contract
+sends the best to your **phone** (via the free **ntfy** app) and a **live dashboard**. Then you paste the contract
 address into Padre and decide yourself.
 
 It never touches your wallet and never trades.
@@ -52,7 +52,7 @@ After an alert, it also warns you if **the dev starts selling**, if **bundle wal
 
 | Key | What it's for | Where | Cost |
 |---|---|---|---|
-| **Telegram bot token** | Sending you alerts | In Telegram, message **@BotFather**, send `/newbot`, pick a name, and it gives you a token | Free |
+| **ntfy app** | Alerts on your phone | Install **ntfy** from the App Store or Google Play. No account or key needed. | Free |
 | **Helius API key** | Bundle and funding-wallet tracing | Sign up at **dashboard.helius.dev** and copy the API key | Free tier is fine to start |
 | **Anthropic API key** *(optional)* | AI narrative scoring | **console.anthropic.com**, then API Keys | Pay per use. Roughly 1–2¢ per coin it scores; capped by `AI_MAX_CALLS_PER_HOUR` |
 
@@ -101,11 +101,16 @@ Then the real thing:
 npm start
 ```
 
-### Step 4: Connect Telegram
+### Step 4: Get alerts on your phone (ntfy)
 
-1. Open your new bot in Telegram and send `/chatid`.
-2. It replies with a number. Put it in `.env` as `TELEGRAM_CHAT_ID=...`.
-3. Restart (`Ctrl+C`, then `npm start`). You'll get "pump-scout is running".
+1. When the bot starts, it prints a line like
+   `Phone alerts (ntfy): on - in the ntfy app, subscribe to topic:  memecoin-bot-Xy7...`
+2. In the **ntfy** app, tap **+**, type that topic name exactly, and tap **Subscribe**.
+3. You'll get "Memecoin bot is running". Tapping an alert opens the coin (in Padre if you set
+   `PADRE_URL_TEMPLATE`), and the contract address is at the bottom of each alert.
+
+The topic name works like a password: anyone who knows it can read your alerts. Don't share it.
+It is saved in `data/ntfy-topic.txt`. Delete that file to get a new one.
 
 ### Step 5: Keep it running when you close the window
 
@@ -128,15 +133,11 @@ with the contract address replaced by `{mint}`. Alerts will then have a one-tap 
 
 ---
 
-## Telegram commands
+## Telegram (optional)
 
-| Command | |
-|---|---|
-| `/top` | Best coins right now |
-| `/check <CA>` | Full scorecard for a coin the bot is tracking |
-| `/stats` | How past alerts performed (hit 1.5x / 2x, graduated) |
-| `/themes` | Narratives running right now |
-| `/pause` / `/resume` | Stop or start alerts |
+Prefer Telegram, or want both? Set `TELEGRAM_BOT_TOKEN` (from @BotFather) and send `/chatid` to your
+bot to get `TELEGRAM_CHAT_ID`. Telegram also gives you commands: `/top`, `/check <CA>`, `/stats`,
+`/themes`, `/pause`, `/resume`.
 
 ## Tuning (in `.env`)
 
@@ -168,7 +169,7 @@ src/safety.js     bundle / linked-wallet / dev / holder checks
 src/momentum.js   flow metrics
 src/narrative.js  metadata, trending meta, AI + rule narrative score
 src/engine.js     when to score, alerts, follow-up warnings
-src/telegram.js   alerts + commands
+src/notify.js     phone alerts (ntfy) + optional Telegram (src/telegram.js)
 src/server.js     dashboard server; public/index.html is the page
 src/store.js      SQLite history (dev launches, socials, alert outcomes)
 ```

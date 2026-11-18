@@ -3,13 +3,13 @@ import { Coin } from './coin.js';
 import { gatherChainData, analyzeSafety, launchBlockWallets } from './safety.js';
 import { analyzeMomentum } from './momentum.js';
 import { fetchMetadata, ruleNarrative, socialKey, TrendTracker } from './narrative.js';
-import { combine, formatAlert, formatWarning } from './score.js';
+import { combine } from './score.js';
 
 const MAX_PARALLEL_EVALS = 4;
 
 export class Engine {
-  constructor({ cfg, feed, chain, store, telegram, ai, log = console }) {
-    Object.assign(this, { cfg, feed, chain, store, telegram, ai, log });
+  constructor({ cfg, feed, chain, store, notifier, ai, log = console }) {
+    Object.assign(this, { cfg, feed, chain, store, notifier, ai, log });
     this.coins = new Map();
     this.trends = new TrendTracker();
     this.running = 0;
@@ -91,7 +91,7 @@ export class Engine {
     if (coin.warningsSent.has(key)) return;
     coin.warningsSent.add(key);
     coin.result?.events?.push({ at: Date.now(), text });
-    this.telegram.send(formatWarning(coin, text));
+    this.notifier.warn(coin, text);
   }
 
   #evictOne() {
@@ -197,7 +197,7 @@ export class Engine {
         this.store.addAlert(coin, alertStage, coin.result);
         this.counters.alerts++;
         this.log.info(`ALERT ${light} $${coin.symbol} ${score}/100 [${alertStage}] ${coin.mint}`);
-        await this.telegram.send(formatAlert(coin, coin.result, alertStage, { solUsd: this.solUsd, padreTemplate: cfg.padreUrlTemplate }));
+        await this.notifier.alert(coin, coin.result, alertStage);
       }
     }
     return coin.result;
@@ -240,7 +240,7 @@ export class Engine {
       demo: this.cfg.demo, feedConnected: this.feedConnected, paused: this.paused,
       tracked: this.coins.size, ...this.counters, solUsd: this.solUsd,
       helius: Boolean(this.chain?.enabled), ai: this.ai?.enabled ? this.cfg.aiModel : (this.ai?.disabledReason || 'off'),
-      telegram: Boolean(this.telegram?.enabled && this.cfg.telegramChatId),
+      notify: this.notifier.channels,
       hotThemes: this.trends.hotThemes(), alertMinScore: this.cfg.alertMinScore,
     };
   }

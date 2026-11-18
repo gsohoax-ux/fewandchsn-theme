@@ -4,6 +4,7 @@ import { PumpPortalFeed, DemoFeed, DemoChain } from './feed.js';
 import { HeliusChain } from './chain.js';
 import { Store } from './store.js';
 import { Telegram } from './telegram.js';
+import { Ntfy, Notifier, resolveNtfyTopic } from './notify.js';
 import { AiNarrator } from './narrative.js';
 import { Engine } from './engine.js';
 import { startServer } from './server.js';
@@ -22,9 +23,11 @@ const feed = cfg.demo ? new DemoFeed(chain, log) : new PumpPortalFeed(cfg.pumppo
 const store = new Store(cfg.demo ? ':memory:' : cfg.dbPath);
 const telegram = new Telegram({ token: cfg.telegramToken, chatId: cfg.telegramChatId, log });
 const ai = new AiNarrator({ apiKey: cfg.anthropicKey, model: cfg.aiModel, maxPerHour: cfg.aiMaxCallsPerHour });
-const engine = new Engine({ cfg, feed, chain, store, telegram, ai, log });
+const ntfy = new Ntfy({ server: cfg.ntfyServer, topic: resolveNtfyTopic(cfg, log), token: cfg.ntfyToken, log });
+const notifier = new Notifier({ ntfy, telegram, cfg, getSolUsd: () => engine.solUsd });
+const engine = new Engine({ cfg, feed, chain, store, notifier, ai, log });
 
-// Telegram commands
+// Telegram commands (only used if you set up Telegram too)
 telegram.on('help', async () => [
   '<b>pump-scout commands</b>',
   '/top - best coins right now',
@@ -60,9 +63,10 @@ telegram.on('resume', async () => { engine.paused = false; return '▶️ Alerts
 log.info(`pump-scout starting${cfg.demo ? ' in DEMO mode' : ''}`);
 log.info(`  Helius (bundle tracing): ${chain.enabled ? 'on' : 'OFF - add HELIUS_API_KEY for accurate bundle detection'}`);
 log.info(`  AI narrative: ${ai.enabled ? cfg.aiModel : 'OFF - using rule-based narrative score'}`);
-log.info(`  Telegram: ${telegram.enabled ? (cfg.telegramChatId ? 'on' : 'token set - send /chatid to your bot to get your chat id') : 'OFF'}`);
+log.info(`  Phone alerts (ntfy): ${ntfy.enabled ? `on - in the ntfy app, subscribe to topic:  ${ntfy.topic}` : 'OFF'}`);
+if (telegram.enabled) log.info(`  Telegram: ${cfg.telegramChatId ? 'on' : 'token set - send /chatid to your bot to get your chat id'}`);
 
 engine.start();
 startServer({ engine, store, cfg, log });
 telegram.poll();
-if (telegram.enabled && cfg.telegramChatId) telegram.send(`🤖 pump-scout is running${cfg.demo ? ' (DEMO - fake coins)' : ''}. Send /help for commands.`);
+notifier.info(`🤖 Memecoin bot is running${cfg.demo ? ' (DEMO - fake coins)' : ''}. You'll get alerts here.`);

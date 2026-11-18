@@ -47,6 +47,32 @@ export function formatAlert(coin, r, stage, { solUsd, padreTemplate } = {}) {
   return lines.filter((l, i) => l !== '' || lines[i - 1] !== '').join('\n');
 }
 
+/** Plain-text version for ntfy push notifications. */
+export function alertNotification(coin, r, stage, { solUsd, padreTemplate, dashboardUrl } = {}) {
+  const { safety: s, narrative: n, momentum: m } = r;
+  const links = coin.links(padreTemplate);
+  const tag = stage === 'mid' ? 'MID-CURVE' : stage === 'manual' ? 'CHECK' : 'FRESH';
+  const message = [
+    `${coin.name} · MC ${fmtMc(coin.mcSol, solUsd)} · Curve ${coin.progress.toFixed(0)}% · ${fmtAge(coin.ageSec())} · ${m.holders} holders`,
+    `🧠 Narrative ${n.score}${n.theme ? ` — ${n.theme}` : ''}${n.summary ? `: ${n.summary}` : ''}`,
+    `📈 Momentum ${m.score} — curve ${m.progressPerMin >= 0 ? '+' : ''}${m.progressPerMin.toFixed(1)}%/min, buy/sell ${m.buySellRatio.toFixed(1)}x, ${m.uniqueBuyers2m} buyers in 2m`,
+    `🛡 Safety ${s.verdict} (${s.score})`,
+    ...s.flags.map((f) => `${ICON[f.level]} ${f.text}`),
+    ...(n.redFlags ?? []).map((f) => `⚠️ ${f}`),
+    '',
+    `CA: ${coin.mint}`,
+  ].join('\n');
+  const actions = [
+    links.padre && { label: 'Padre', url: links.padre },
+    { label: 'pump.fun', url: links.pump },
+    dashboardUrl && { label: 'Dashboard', url: dashboardUrl },
+  ].filter(Boolean);
+  return {
+    title: `${r.light} $${coin.symbol} ${r.score}/100 · ${tag}`,
+    message, priority: r.score >= 75 ? 5 : 4, click: links.padre || links.pump, actions,
+  };
+}
+
 export function formatWarning(coin, text) {
   return `⚠️ <b>$${esc(coin.symbol)}</b> — ${esc(text)}\n<code>${coin.mint}</code>`;
 }
