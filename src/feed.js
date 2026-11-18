@@ -92,7 +92,9 @@ export class DemoChain {
 }
 
 export class DemoFeed extends EventEmitter {
-  constructor(chain, log = console) { super(); this.chain = chain; this.log = log; this.watched = new Set(); this.connected = true; }
+  constructor(chain, log = console, xSource = null) {
+    super(); this.chain = chain; this.log = log; this.xSource = xSource; this.watched = new Set(); this.connected = true;
+  }
   watch(m) { this.watched.add(m); }
   unwatch(m) { this.watched.delete(m); }
 
@@ -149,7 +151,7 @@ export class DemoFeed extends EventEmitter {
     this.emit('create', { signature: createSig, mint, traderPublicKey: creator, txType: 'create',
       initialBuy: devTokens, solAmount: devBuy, vTokensInBondingCurve: vTokens, vSolInBondingCurve: vSol,
       marketCapSol: (vSol / vTokens) * 1e9, name, symbol, uri: '',
-      _meta: { description, twitter: tw, telegram: Math.random() < 0.5 ? `https://t.me/${symbol.toLowerCase()}` : '', website: '' } });
+      _meta: { description, twitter: (Math.random() < 0.6 && this.xSource?.randomPostFor(symbol)?.url) || tw, telegram: Math.random() < 0.5 ? `https://t.me/${symbol.toLowerCase()}` : '', website: '' } });
 
     // bundle: several fresh wallets, same funder, same block as create
     const insiders = [];
@@ -182,7 +184,8 @@ export class DemoFeed extends EventEmitter {
       if (scenario === 'dead') { if (Math.random() < 0.5) res = trade(newWallet(), 'buy', rnd(0.05, 0.3)); }
       else if (scenario === 'wash') {
         const w = pick(washers);
-        res = trade(w, (bal.get(w) ?? 0) > 0 && Math.random() < 0.5 ? 'sell' : 'buy', Math.random() < 0.5 ? 0.5 : 4e6);
+        const sell = (bal.get(w) ?? 0) > 0 && Math.random() < 0.5;
+        res = trade(w, sell ? 'sell' : 'buy', sell ? (bal.get(w) ?? 0) * rnd(0.5, 1) : rnd(0.3, 0.8));
         if (Math.random() < 0.25) res = trade(newWallet(), 'buy', rnd(0.05, 0.4));
       } else {
         const hype = scenario === 'runner' ? 0.82 : step < 40 ? 0.7 : 0.35;

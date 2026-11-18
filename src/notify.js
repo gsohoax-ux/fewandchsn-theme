@@ -76,6 +76,20 @@ export class Notifier {
     ]);
   }
 
+  /** A new X post that could become a meme coin. */
+  async post(p) {
+    const title = `${this.prefix}📣 Meme-able post by @${p.author} (meme ${p.meme})`;
+    const message = [p.text.slice(0, 280), '',
+      `❤️ ${p.metrics.likes.toLocaleString()} · 🔁 ${p.metrics.retweets.toLocaleString()}`,
+      p.idea ? `Likely coin: ${p.idea}` : '',
+      'Watching Pump.fun for coins about this - you get an alert if one is rising and passes safety.',
+    ].filter(Boolean).join('\n');
+    await Promise.all([
+      this.ntfy?.send({ title, message, priority: 3, click: p.url, actions: [{ label: 'Open post', url: p.url }] }),
+      this.telegram?.send(`<b>${title.replace(/[<>&]/g, '')}</b>\n${message.replace(/[<>&]/g, '')}\n${p.url}`),
+    ]);
+  }
+
   async info(text) {
     await Promise.all([
       this.ntfy?.send({ title: this.prefix + 'Memecoin bot', message: text, priority: 2 }),

@@ -38,6 +38,19 @@ export const config = {
   aiModel: env('AI_MODEL', 'claude-opus-5-5'),
   aiMaxCallsPerHour: num('AI_MAX_CALLS_PER_HOUR', 120),
 
+  // X (Twitter) watcher
+  xBearerToken: env('X_BEARER_TOKEN'),
+  xWatchAccounts: list('X_WATCH_ACCOUNTS').length ? list('X_WATCH_ACCOUNTS')
+    : ['elonmusk', 'realDonaldTrump', 'cz_binance', 'MrBeast'],
+  xSearchQuery: env('X_SEARCH_QUERY'),
+  xPollSec: num('X_POLL_SECONDS', 180),
+  xMaxPostAgeH: num('X_MAX_POST_AGE_HOURS', 12),
+  xMinViralForAi: num('X_MIN_VIRAL_FOR_AI', 25),
+  xPostAlerts: env('X_POST_ALERTS', '1') === '1',
+  xPostAlertMin: num('X_POST_ALERT_MIN', 80),
+  xMinMomentum: num('X_MIN_MOMENTUM', 50),
+  xMinBuyers: num('X_MIN_BUYERS', 8),
+
   // Dashboard
   port: num('PORT', 8080),
   dashboardPassword: env('DASHBOARD_PASSWORD'),

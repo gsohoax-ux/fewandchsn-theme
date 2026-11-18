@@ -4,12 +4,13 @@ import { gatherChainData, analyzeSafety, launchBlockWallets } from './safety.js'
 import { analyzeMomentum } from './momentum.js';
 import { fetchMetadata, ruleNarrative, socialKey, TrendTracker } from './narrative.js';
 import { combine } from './score.js';
+import { computeConfidence } from './confidence.js';
 
 const MAX_PARALLEL_EVALS = 4;
 
 export class Engine {
-  constructor({ cfg, feed, chain, store, notifier, ai, log = console }) {
-    Object.assign(this, { cfg, feed, chain, store, notifier, ai, log });
+  constructor({ cfg, feed, chain, store, notifier, ai, xwatch = null, log = console }) {
+    Object.assign(this, { cfg, feed, chain, store, notifier, ai, xwatch, log });
     this.coins = new Map();
     this.trends = new TrendTracker();
     this.running = 0;
@@ -26,6 +27,10 @@ export class Engine {
     this.feed.on('migrate', (m) => this.onMigrate(m));
     this.feed.on('status', (s) => { this.feedConnected = s.connected; });
     this.feed.start();
+    if (this.xwatch?.enabled) {
+      this.xwatch.on('posts', () => this.#rematchAll());
+      this.xwatch.start();
+    }
     setInterval(() => this.tick(), 2000).unref();
     setInterval(() => this.store.pruneOld(), 6 * 3600_000).unref();
     if (!this.cfg.demo) { this.#updateSolPrice(); setInterval(() => this.#updateSolPrice(), 5 * 60_000).unref(); }
@@ -56,7 +61,30 @@ export class Engine {
       const tg = socialKey(meta?.telegram);
       const ownSocial = sk && sk.kind !== 'tweet' ? sk.key : tg?.key ?? null;
       this.store.setSocials(coin.mint, ownSocial, sk?.kind === 'tweet' ? sk.key : null);
+      if (sk?.kind === 'tweet') this.xwatch?.trackLinkedPost(sk.key.slice('tweet:'.length));
+      coin.xMatch = this.#xMatch(coin);
     }).catch(() => { coin.meta = coin.meta ?? {}; });
+  }
+
+  #xMatch(coin) {
+    if (!this.xwatch?.posts.size || !coin.meta) return null;
+    const m = this.xwatch.match(coin);
+    return m && m.strength >= 0.5 ? m : null;
+  }
+
+  #rematchAll() { for (const c of this.coins.values()) c.xMatch = this.#xMatch(c); }
+
+  /** Details of the X post a coin is about, and where it ranks among coins on that post. */
+  #xInfo(coin) {
+    const m = coin.xMatch;
+    if (!m) return null;
+    const p = m.post;
+    const rivals = [...this.coins.values()].filter((c) => c.xMatch?.post.id === p.id).sort((a, b) => b.mcSol - a.mcSol);
+    return {
+      id: p.id, url: p.url, author: p.author, text: p.text.slice(0, 160), likes: p.metrics.likes,
+      reposts: p.metrics.retweets, viral: p.viral, meme: p.meme, idea: p.idea ?? '', how: m.how,
+      strength: m.strength, rank: rivals.indexOf(coin) + 1, coinsOnPost: rivals.length,
+    };
   }
 
   onTrade(msg) {
@@ -121,12 +149,14 @@ export class Engine {
       if (coin.alert) this.store.updatePeak(coin.mint, coin.peakMcSinceAlert, coin.migrated);
 
       if (coin.evaluating || this.paused) continue;
-      if (!coin.freshDone && age >= cfg.freshMinAgeSec && age <= cfg.freshMaxAgeSec &&
+      if (coin.xMatch && !coin.xDone && age >= cfg.freshMinAgeSec && coin.buyers.size >= cfg.xMinBuyers && !coin.migrated) {
+        coin.xDone = true; this.#enqueue(coin, 'x');
+      } else if (!coin.freshDone && age >= cfg.freshMinAgeSec && age <= cfg.freshMaxAgeSec &&
           (coin.buyers.size >= cfg.freshMinBuyers || coin.progress >= 10)) {
         coin.freshDone = true; this.#enqueue(coin, 'fresh');
       } else if (!coin.midDone && coin.progress >= cfg.midProgressPct && !coin.migrated) {
         coin.midDone = true; coin.freshDone = true; this.#enqueue(coin, 'mid');
-      } else if (coin.result && now - coin.lastEvalAt > cfg.recheckEverySec * 1000 && coin.progress > 15 && !coin.migrated) {
+      } else if (coin.result && now - coin.lastEvalAt > cfg.recheckEverySec * 1000 && (coin.progress > 15 || coin.xMatch) && !coin.migrated) {
         this.#enqueue(coin, 'recheck');
       }
     }
@@ -173,34 +203,58 @@ export class Engine {
       sameTweetCoins: sk?.kind === 'tweet' ? this.store.sameTweetCoins(sk.key, coin.mint, now - 6 * 3600_000) : 0,
     };
     let narrative = ruleNarrative(coin, nctx);
-    const reuseAi = coin.result?.narrative?.source === 'ai';
-    if (reuseAi) narrative = coin.result.narrative;
+    if (coin.baseNarrative?.source === 'ai') narrative = coin.baseNarrative;
     else if (this.ai?.enabled && safety.verdict !== 'AVOID' && momentum.score >= 35) {
       try { narrative = await this.ai.score(coin, nctx, narrative); }
       catch (e) { this.log.warn(`AI narrative ${coin.symbol}: ${e.message}`); }
     }
+    coin.baseNarrative = narrative;
+
+    // A coin riding a viral, meme-able X post gets a narrative boost
+    coin.xMatch = this.#xMatch(coin) ?? coin.xMatch;
+    const x = this.#xInfo(coin);
+    if (x && x.viral >= 40) {
+      const target = Math.round((40 + 0.3 * x.viral + 0.3 * x.meme) * (0.5 + x.strength / 2));
+      if (target > narrative.score) {
+        narrative = { ...narrative, score: Math.min(100, target),
+          summary: `Viral X post by @${x.author} (${x.likes.toLocaleString()} likes); ${narrative.summary}` };
+      }
+    }
 
     const { score, light } = combine(safety, narrative, momentum);
+    const confidence = computeConfidence(coin, { safety, narrative, momentum, score, x }, {
+      runnersSeen: this.trends.runners.length, history: this.store.similarAlerts(score, now),
+    });
     const insiderWallets = coin.result?.insiderWallets ?? this.#insiders(coin, chainData);
     const insiderHeldAtEval = coin.result?.insiderHeldAtEval ?? insiderWallets.reduce((s, w) => s + coin.holderPct(w), 0);
-    coin.result = { at: now, stage, score, light, safety, momentum, narrative, insiderWallets,
+    coin.result = { at: now, stage, score, light, safety, momentum, narrative, confidence, x, insiderWallets,
       insiderHeldAtEval, events: coin.result?.events ?? [] };
     this.counters.evaluated++;
+
+    // X narrative alert: about a meme-able post, leading coin on it, rising, and SAFE
+    const rising = momentum.score >= cfg.xMinMomentum && momentum.progressPerMin > 0 && momentum.buySellRatio >= 1.2;
+    if (x && !coin.xAlerted && !this.paused && safety.verdict === 'SAFE' && rising && x.rank === 1) {
+      coin.xAlerted = true;
+      await this.#sendAlert(coin, 'x', score, light, now);
+      return coin.result;
+    }
 
     const shouldAlert = score >= cfg.alertMinScore && safety.verdict !== 'AVOID' &&
       (stage === 'fresh' || stage === 'mid' || (stage === 'recheck' && !coin.alert));
     if (shouldAlert && !this.paused) {
       const alertStage = stage === 'recheck' ? (coin.progress >= cfg.midProgressPct ? 'mid' : 'fresh') : stage;
-      if (!coin.alert || coin.alert.stage !== alertStage) {
-        coin.alert = { stage: alertStage, at: now, mcSol: coin.mcSol, score };
-        coin.peakMcSinceAlert = Math.max(coin.peakMcSinceAlert, coin.mcSol);
-        this.store.addAlert(coin, alertStage, coin.result);
-        this.counters.alerts++;
-        this.log.info(`ALERT ${light} $${coin.symbol} ${score}/100 [${alertStage}] ${coin.mint}`);
-        await this.notifier.alert(coin, coin.result, alertStage);
-      }
+      if (!coin.alert || coin.alert.stage !== alertStage) await this.#sendAlert(coin, alertStage, score, light, now);
     }
     return coin.result;
+  }
+
+  async #sendAlert(coin, stage, score, light, now) {
+    coin.alert = { stage, at: now, mcSol: coin.mcSol, score };
+    coin.peakMcSinceAlert = Math.max(coin.peakMcSinceAlert, coin.mcSol);
+    this.store.addAlert(coin, stage, coin.result);
+    this.counters.alerts++;
+    this.log.info(`ALERT ${light} $${coin.symbol} ${score}/100 [${stage}] conf ${coin.result.confidence.label} ${coin.mint}`);
+    await this.notifier.alert(coin, coin.result, stage);
   }
 
   #insiders(coin, chainData) {
@@ -224,6 +278,7 @@ export class Engine {
       links: coin.links(this.cfg.padreUrlTemplate),
       score: r?.score ?? null, light: r?.light ?? '', stage: r?.stage ?? null, evaluatedAt: r?.at ?? null,
       safety: r?.safety ?? null, narrative: r?.narrative ?? null, momentum: r?.momentum ?? null,
+      confidence: r?.confidence ?? null, x: r?.x ?? null,
       events: r?.events ?? [],
       alert: coin.alert ? { ...coin.alert, peakMult: coin.alert.mcSol ? coin.peakMcSinceAlert / coin.alert.mcSol : 1 } : null,
     };
@@ -235,12 +290,32 @@ export class Engine {
       .slice(0, limit).map((c) => this.coinView(c));
   }
 
+  /** Meme-able X posts and the coins found for each. */
+  xPosts(limit = 12) {
+    if (!this.xwatch) return [];
+    const byPost = new Map();
+    for (const c of this.coins.values()) {
+      const id = c.xMatch?.post.id;
+      if (!id) continue;
+      if (!byPost.has(id)) byPost.set(id, []);
+      byPost.get(id).push({ mint: c.mint, symbol: c.symbol, mcSol: c.mcSol, score: c.result?.score ?? null,
+        verdict: c.result?.safety.verdict ?? null });
+    }
+    return this.xwatch.list(limit).map((p) => ({
+      id: p.id, url: p.url, author: p.author, text: p.text.slice(0, 220), createdAt: p.createdAt,
+      likes: p.metrics.likes, reposts: p.metrics.retweets, viral: p.viral, meme: p.meme, idea: p.idea ?? '',
+      memeSource: p.memeSource, origin: p.origin,
+      coins: (byPost.get(p.id) ?? []).sort((a, b) => b.mcSol - a.mcSol).slice(0, 5),
+    }));
+  }
+
   status() {
     return {
       demo: this.cfg.demo, feedConnected: this.feedConnected, paused: this.paused,
       tracked: this.coins.size, ...this.counters, solUsd: this.solUsd,
       helius: Boolean(this.chain?.enabled), ai: this.ai?.enabled ? this.cfg.aiModel : (this.ai?.disabledReason || 'off'),
       notify: this.notifier.channels,
+      x: this.xwatch?.enabled ? { on: true, posts: this.xwatch.posts.size, error: this.xwatch.lastError } : { on: false },
       hotThemes: this.trends.hotThemes(), alertMinScore: this.cfg.alertMinScore,
     };
   }

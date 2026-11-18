@@ -1,4 +1,4 @@
-// pump-scout entry point.  `npm start` (live)  |  `npm run demo` (simulated coins)
+// Memecoin bot (pump-scout) entry point.  `npm start` (live)  |  `npm run demo` (simulated coins)
 import { config as cfg } from './config.js';
 import { PumpPortalFeed, DemoFeed, DemoChain } from './feed.js';
 import { HeliusChain } from './chain.js';
@@ -9,6 +9,7 @@ import { AiNarrator } from './narrative.js';
 import { Engine } from './engine.js';
 import { startServer } from './server.js';
 import { fmtMc } from './score.js';
+import { XWatcher, XApiSource, DemoXSource } from './xwatch.js';
 
 const ts = () => new Date().toISOString().slice(11, 19);
 const log = {
@@ -19,13 +20,16 @@ const log = {
 const chain = cfg.demo ? new DemoChain() : new HeliusChain({
   rpcUrl: cfg.heliusRpcUrl, apiUrl: cfg.heliusApiUrl, apiKey: cfg.heliusKey, concurrency: cfg.heliusConcurrency,
 });
-const feed = cfg.demo ? new DemoFeed(chain, log) : new PumpPortalFeed(cfg.pumpportalUrl, log);
+const xSource = cfg.demo ? new DemoXSource() : cfg.xBearerToken ? new XApiSource({ token: cfg.xBearerToken }) : null;
+const feed = cfg.demo ? new DemoFeed(chain, log, xSource) : new PumpPortalFeed(cfg.pumpportalUrl, log);
 const store = new Store(cfg.demo ? ':memory:' : cfg.dbPath);
 const telegram = new Telegram({ token: cfg.telegramToken, chatId: cfg.telegramChatId, log });
 const ai = new AiNarrator({ apiKey: cfg.anthropicKey, model: cfg.aiModel, maxPerHour: cfg.aiMaxCallsPerHour });
 const ntfy = new Ntfy({ server: cfg.ntfyServer, topic: resolveNtfyTopic(cfg, log), token: cfg.ntfyToken, log });
 const notifier = new Notifier({ ntfy, telegram, cfg, getSolUsd: () => engine.solUsd });
-const engine = new Engine({ cfg, feed, chain, store, notifier, ai, log });
+if (cfg.demo) cfg.xPollSec = 15;
+const xwatch = new XWatcher({ source: xSource, ai, cfg, notifier, log });
+const engine = new Engine({ cfg, feed, chain, store, notifier, ai, xwatch, log });
 
 // Telegram commands (only used if you set up Telegram too)
 telegram.on('help', async () => [
@@ -60,9 +64,10 @@ telegram.on('themes', async () => {
 telegram.on('pause', async () => { engine.paused = true; return '⏸ Alerts paused'; });
 telegram.on('resume', async () => { engine.paused = false; return '▶️ Alerts resumed'; });
 
-log.info(`pump-scout starting${cfg.demo ? ' in DEMO mode' : ''}`);
+log.info(`Memecoin bot starting${cfg.demo ? ' in DEMO mode' : ''}`);
 log.info(`  Helius (bundle tracing): ${chain.enabled ? 'on' : 'OFF - add HELIUS_API_KEY for accurate bundle detection'}`);
 log.info(`  AI narrative: ${ai.enabled ? cfg.aiModel : 'OFF - using rule-based narrative score'}`);
+log.info(`  X watcher: ${xwatch.enabled ? `on - watching ${cfg.xWatchAccounts.map((a) => '@' + a).join(', ')}${cfg.xSearchQuery ? ' + search' : ''}` : 'OFF - add X_BEARER_TOKEN to watch X for meme-able posts'}`);
 log.info(`  Phone alerts (ntfy): ${ntfy.enabled ? `on - in the ntfy app, subscribe to topic:  ${ntfy.topic}` : 'OFF'}`);
 if (telegram.enabled) log.info(`  Telegram: ${cfg.telegramChatId ? 'on' : 'token set - send /chatid to your bot to get your chat id'}`);
 

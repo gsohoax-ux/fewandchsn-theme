@@ -24,14 +24,34 @@ export function fmtMc(mcSol, solUsd) {
   return usd >= 1e6 ? `$${(usd / 1e6).toFixed(2)}M` : `$${(usd / 1e3).toFixed(1)}k`;
 }
 
+const stageTag = (stage) => ({ mid: 'MID-CURVE', manual: 'CHECK', x: 'X NARRATIVE' }[stage] ?? 'FRESH');
+
+function confLine(r) {
+  const c = r.confidence;
+  return c ? `🎯 Confidence ${c.label} ${c.meter} (${c.value})${c.track ? ` · similar past alerts hit 1.5x ${c.track.hitPct}% of the time` : ''}` : '';
+}
+
+function xLines(r) {
+  const x = r.x;
+  if (!x) return [];
+  return [
+    `🐦 From X: @${x.author} — "${x.text.replace(/\s+/g, ' ').slice(0, 110)}${x.text.length > 110 ? '…' : ''}"`,
+    `   ❤️ ${x.likes.toLocaleString()} · viral ${x.viral} · meme ${x.meme} · coin ${x.how}` +
+      (x.coinsOnPost > 1 ? ` · #${x.rank} of ${x.coinsOnPost} coins on this post` : ' · only coin on this post'),
+  ];
+}
+
 export function formatAlert(coin, r, stage, { solUsd, padreTemplate } = {}) {
   const { safety: s, narrative: n, momentum: m } = r;
   const links = coin.links(padreTemplate);
-  const tag = stage === 'mid' ? 'MID-CURVE' : stage === 'manual' ? 'CHECK' : 'FRESH';
+  const tag = stageTag(stage);
   const lines = [
     `${r.light} <b>$${esc(coin.symbol)}</b> · ${esc(coin.name)}   <b>${r.score}/100</b>  [${tag}]`,
     `<code>${coin.mint}</code>`,
     `MC ${fmtMc(coin.mcSol, solUsd)} · Curve ${coin.progress.toFixed(0)}% · Age ${fmtAge(coin.ageSec())} · ${m.holders} holders`,
+    esc(confLine(r)),
+    ...xLines(r).map(esc),
+    ...(r.x ? [`<a href="${r.x.url}">Open the X post</a>`] : []),
     '',
     `🧠 <b>Narrative ${n.score}</b>${n.theme ? ` — ${esc(n.theme)}` : ''}${n.freshness && n.freshness !== 'unknown' ? ` (${esc(n.freshness.replace('_', ' '))})` : ''}`,
     n.summary ? `   ${esc(n.summary)}` : '',
@@ -51,9 +71,11 @@ export function formatAlert(coin, r, stage, { solUsd, padreTemplate } = {}) {
 export function alertNotification(coin, r, stage, { solUsd, padreTemplate, dashboardUrl } = {}) {
   const { safety: s, narrative: n, momentum: m } = r;
   const links = coin.links(padreTemplate);
-  const tag = stage === 'mid' ? 'MID-CURVE' : stage === 'manual' ? 'CHECK' : 'FRESH';
+  const tag = stageTag(stage);
   const message = [
     `${coin.name} · MC ${fmtMc(coin.mcSol, solUsd)} · Curve ${coin.progress.toFixed(0)}% · ${fmtAge(coin.ageSec())} · ${m.holders} holders`,
+    confLine(r),
+    ...xLines(r),
     `🧠 Narrative ${n.score}${n.theme ? ` — ${n.theme}` : ''}${n.summary ? `: ${n.summary}` : ''}`,
     `📈 Momentum ${m.score} — curve ${m.progressPerMin >= 0 ? '+' : ''}${m.progressPerMin.toFixed(1)}%/min, buy/sell ${m.buySellRatio.toFixed(1)}x, ${m.uniqueBuyers2m} buyers in 2m`,
     `🛡 Safety ${s.verdict} (${s.score})`,
@@ -61,14 +83,14 @@ export function alertNotification(coin, r, stage, { solUsd, padreTemplate, dashb
     ...(n.redFlags ?? []).map((f) => `⚠️ ${f}`),
     '',
     `CA: ${coin.mint}`,
-  ].join('\n');
+  ].filter((l) => l !== null && l !== undefined).join('\n');
   const actions = [
     links.padre && { label: 'Padre', url: links.padre },
-    { label: 'pump.fun', url: links.pump },
+    r.x ? { label: 'X post', url: r.x.url } : { label: 'pump.fun', url: links.pump },
     dashboardUrl && { label: 'Dashboard', url: dashboardUrl },
   ].filter(Boolean);
   return {
-    title: `${r.light} $${coin.symbol} ${r.score}/100 · ${tag}`,
+    title: `${stage === 'x' ? '🐦' : r.light} $${coin.symbol} ${r.score}/100 · ${tag}${r.confidence ? ` · ${r.confidence.label} confidence` : ''}`,
     message, priority: r.score >= 75 ? 5 : 4, click: links.padre || links.pump, actions,
   };
 }

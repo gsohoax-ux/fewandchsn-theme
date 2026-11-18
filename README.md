@@ -34,6 +34,34 @@ MC $9.8k · Curve 24% · Age 1m 40s · 61 holders
 | **Narrative** | AI reads name, ticker, description and socials, and compares them with **what's actually pumping right now**. The bot learns the current meta from coins that reach 30%+ of the curve. It also flags copycats (same ticker) and "tweet coins". |
 | **Momentum** | Curve speed (%/min), unique buyers, buy/sell volume, net SOL inflow, wash-trading, drawdown from the high, and optional "smart wallets" you list. |
 
+### 🎯 Confidence meter
+
+Every score comes with a confidence rating: **Low / Medium / High** and a meter like ▰▰▰▱▱.
+It answers *"how much should I trust this score?"*, not *"will it go up?"*:
+
+- **Data quality:** on-chain bundle check or only an estimate? AI-read narrative or simple rules?
+  Enough buyers to judge? Has the bot learned the current meta yet?
+- **Agreement:** do safety, narrative and momentum point the same way, or are the signals mixed?
+- **Track record:** once there are 10+ past alerts with a similar score, it shows how often they
+  reached 1.5x and folds that in.
+
+Tap a coin on the dashboard to see exactly why its confidence is what it is.
+
+### 🐦 X watcher (optional, needs an X API key)
+
+- Watches X accounts you choose, plus an optional search, for **new posts that are blowing up**.
+- Rates each post's **meme potential**. With an Anthropic key, AI reads the post and guesses the
+  likely coin name and ticker.
+- Also looks up the posts that new coins link to, to check whether that post is actually viral.
+- Matches Pump.fun coins to posts by link, ticker or name.
+- **🐦 X NARRATIVE alert** only when a coin about the post is **the leading coin** on it, is
+  **rising** (momentum, curve going up, more buying than selling) **and is SAFE**. CAUTION or
+  AVOID coins never get this alert.
+- Optional **📣 meme-able post** notification as soon as a hot post appears, so you can watch
+  for the coin.
+- Dashboard panel **"Posts on X to watch"**: each post, how viral and meme-able it is, and the coins
+  found for it with their scores.
+
 Each coin is scored **twice** to match your style:
 - **FRESH**: once it has ~15 buyers (usually in the first 1–3 minutes)
 - **MID-CURVE**: when it reaches 35% of the bonding curve
@@ -54,6 +82,7 @@ After an alert, it also warns you if **the dev starts selling**, if **bundle wal
 |---|---|---|---|
 | **ntfy app** | Alerts on your phone | Install **ntfy** from the App Store or Google Play. No account or key needed. | Free |
 | **Helius API key** | Bundle and funding-wallet tracing | Sign up at **dashboard.helius.dev** and copy the API key | Free tier is fine to start |
+| **X API Bearer token** *(optional)* | X watcher | **developer.x.com**, create a project or app, then copy the Bearer token. **Paid**: check current pricing. | Paid |
 | **Anthropic API key** *(optional)* | AI narrative scoring | **console.anthropic.com**, then API Keys | Pay per use. Roughly 1–2¢ per coin it scores; capped by `AI_MAX_CALLS_PER_HOUR` |
 
 Without Helius, bundle detection still works but is an *estimate*, based on timing.
@@ -169,6 +198,8 @@ src/safety.js     bundle / linked-wallet / dev / holder checks
 src/momentum.js   flow metrics
 src/narrative.js  metadata, trending meta, AI + rule narrative score
 src/engine.js     when to score, alerts, follow-up warnings
+src/confidence.js confidence meter
+src/xwatch.js     X watcher: viral/meme-able posts, matching coins to posts
 src/notify.js     phone alerts (ntfy) + optional Telegram (src/telegram.js)
 src/server.js     dashboard server; public/index.html is the page
 src/store.js      SQLite history (dev launches, socials, alert outcomes)

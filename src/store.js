@@ -33,6 +33,8 @@ export class Store {
       recentAlerts: q(`SELECT * FROM alerts ORDER BY at DESC LIMIT ?`),
       since: q(`SELECT * FROM alerts WHERE at >= ?`),
       prune: q(`DELETE FROM launches WHERE created_at < ?`),
+      similar: q(`SELECT COUNT(*) n, SUM(CASE WHEN peak_mc_sol >= 1.5 * mc_sol THEN 1 ELSE 0 END) hits
+                  FROM alerts WHERE score BETWEEN ? AND ? AND at BETWEEN ? AND ?`),
     };
   }
 
@@ -64,6 +66,12 @@ export class Store {
       migrated: pct((r) => r.migrated),
       medianPeak: n ? +rows.map(mult).sort((a, b) => a - b)[Math.floor(n / 2)].toFixed(2) : 0,
     };
+  }
+
+  /** Past alerts with a similar score, at least 1h old so their outcome is known. */
+  similarAlerts(score, now = Date.now()) {
+    const r = this.s.similar.get(score - 5, score + 5, now - 14 * 86400_000, now - 3600_000);
+    return { n: r.n ?? 0, hits: r.hits ?? 0 };
   }
 
   pruneOld(days = 14) { this.s.prune.run(Date.now() - days * 86400_000); }

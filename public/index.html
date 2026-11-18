@@ -59,6 +59,16 @@
   .links a { color: var(--blue); margin-right: 12px; }
   code { font-size: 12px; word-break: break-all; color: #c8cbe0; }
   .close { margin-left: auto; background: none; border: 0; color: var(--muted); font-size: 22px; cursor: pointer; }
+  .conf { font-size: 11px; color: var(--muted); white-space: nowrap; }
+  .conf b { font-weight: 600; } .c-High { color: var(--green); } .c-Medium { color: var(--yellow); } .c-Low { color: var(--red); }
+  .posts { list-style: none; margin: 0; padding: 0; }
+  .posts li { padding: 12px 14px; border-bottom: 1px solid var(--line); }
+  .posts .who { display: flex; justify-content: space-between; gap: 8px; font-size: 12px; color: var(--muted); }
+  .posts .txt { margin: 4px 0 6px; font-size: 13px; }
+  .posts .tags { display: flex; flex-wrap: wrap; gap: 5px; font-size: 11px; }
+  .posts .tags span { background: var(--panel2); border: 1px solid var(--line); border-radius: 99px; padding: 1px 8px; }
+  .posts .coins { margin-top: 6px; font-size: 12px; }
+  .posts a { color: var(--blue); text-decoration: none; }
   .disclaimer { color: var(--muted); font-size: 12px; padding: 0 20px 20px; text-align: center; }
   @media (max-width: 700px) { .hide-sm { display: none; } td, th { padding: 8px 6px; } }
 </style>
@@ -76,15 +86,16 @@
       <div style="overflow-x:auto">
         <table>
           <thead><tr>
-            <th>Score</th><th>Coin</th><th>Safety</th><th class="hide-sm">Narr.</th><th class="hide-sm">Mom.</th>
+            <th>Score</th><th class="hide-sm">Confidence</th><th>Coin</th><th>Safety</th><th class="hide-sm">Narr.</th><th class="hide-sm">Mom.</th>
             <th>MC</th><th class="hide-sm">Curve</th><th class="hide-sm">Age</th><th class="hide-sm">Holders</th><th></th>
           </tr></thead>
-          <tbody id="rows"><tr><td colspan="10" class="empty">Waiting for coins…</td></tr></tbody>
+          <tbody id="rows"><tr><td colspan="11" class="empty">Waiting for coins…</td></tr></tbody>
         </table>
       </div>
     </div>
   </section>
   <aside class="side">
+    <div class="card" id="xcard"><h2><span>🐦 Posts on X to watch</span><span class="muted">meme-able</span></h2><ul class="posts" id="xposts"></ul></div>
     <div class="card"><h2>Narratives running now</h2><div class="themes" id="themes"></div></div>
     <div class="card"><h2><span>Recent alerts</span><span class="muted">peak after alert</span></h2><ul class="alerts" id="alerts"></ul></div>
   </aside>
@@ -111,6 +122,7 @@ function render() {
     pill(`Helius ${s.helius ? 'on' : 'off'}`, s.helius, 'On-chain bundle & funding tracing') +
     pill(`AI ${s.ai.startsWith('claude') ? 'on' : 'off'}`, s.ai.startsWith('claude'), s.ai) +
     pill(`Alerts: ${s.notify.length ? s.notify.join(' + ') : 'off'}`, s.notify.length > 0) +
+    pill(`X ${s.x.on ? (s.x.error ? 'error' : 'on') : 'off'}`, s.x.on && !s.x.error, s.x.error || (s.x.on ? `${s.x.posts} posts tracked` : 'Add X_BEARER_TOKEN to watch X')) +
     (s.paused ? '<span class="pill off">Alerts paused</span>' : '');
   const st = state.stats;
   $('stats').innerHTML = [
@@ -119,6 +131,14 @@ function render() {
   ].map(([k, v]) => `<div class="stat"><b>${v}</b><small>${k}</small></div>`).join('');
   $('themes').innerHTML = s.hotThemes.length ? s.hotThemes.map((t) => `<span class="chip">${esc(t.word)} · ${t.count}</span>`).join('')
     : '<span class="muted">Learning from coins that pump…</span>';
+  const xp = state.xPosts || [];
+  $('xcard').style.display = s.x.on || xp.length ? '' : 'none';
+  $('xposts').innerHTML = xp.length ? xp.map((p) => `<li>
+      <div class="who"><a target="_blank" rel="noopener" href="${esc(p.url)}">@${esc(p.author)}</a><span>${age(Math.round((Date.now() - p.createdAt) / 1000))} ago</span></div>
+      <div class="txt">${esc(p.text)}</div>
+      <div class="tags"><span>❤️ ${p.likes.toLocaleString()}</span><span>viral ${p.viral}</span><span>meme ${p.meme}${p.memeSource === 'ai' ? ' (AI)' : ''}</span>${p.idea ? `<span>💡 ${esc(p.idea)}</span>` : ''}</div>
+      <div class="coins">${p.coins.length ? p.coins.map((c) => `<a href="#" data-open="${c.mint}">$${esc(c.symbol)}</a> <span class="${c.verdict ? 'v-' + c.verdict : 'muted'}">${c.score ?? '…'}${c.verdict ? ' ' + c.verdict : ''}</span>`).join(' · ') : '<span class="muted">No coin yet — watching Pump.fun</span>'}</div>
+    </li>`).join('') : '<li class="muted">Waiting for posts…</li>';
   $('alerts').innerHTML = state.alerts.length ? state.alerts.map((a) => {
     const m = a.mc_sol ? a.peak_mc_sol / a.mc_sol : 1;
     return `<li><span><b>$${esc(a.symbol)}</b> <span class="muted">${a.score} · ${esc(a.stage)} · ${new Date(a.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span></span>
@@ -127,7 +147,8 @@ function render() {
   $('rows').innerHTML = state.coins.length ? state.coins.map((c) => `
     <tr class="row ${c.alert ? 'alerted' : ''}" data-mint="${c.mint}">
       <td><span class="score ${sc(c)}">${c.score}</span></td>
-      <td><div class="tick">$${esc(c.symbol)}${c.migrated ? ' 🎓' : ''}${c.devSold ? ' <span title="dev sold" class="muted">·ds</span>' : ''}</div><div class="nm">${esc(c.name)}</div></td>
+      <td class="hide-sm">${c.confidence ? `<div class="conf c-${c.confidence.label}"><b>${c.confidence.label}</b> ${c.confidence.meter}</div>` : ''}</td>
+      <td><div class="tick">${c.x ? '<span title="Rides an X post">🐦</span> ' : ''}$${esc(c.symbol)}${c.migrated ? ' 🎓' : ''}${c.devSold ? ' <span title="dev sold" class="muted">·ds</span>' : ''}</div><div class="nm">${esc(c.name)}</div></td>
       <td class="v-${c.safety.verdict}">${c.safety.verdict}</td>
       <td class="hide-sm">${c.narrative.score}</td>
       <td class="hide-sm">${c.momentum.score}</td>
@@ -136,7 +157,7 @@ function render() {
       <td class="hide-sm">${age(c.ageSec)}</td>
       <td class="hide-sm">${c.holders}</td>
       <td><button class="copy" data-copy="${c.mint}">Copy CA</button></td>
-    </tr>`).join('') : '<tr><td colspan="10" class="empty">Waiting for coins to get traction…</td></tr>';
+    </tr>`).join('') : '<tr><td colspan="11" class="empty">Waiting for coins to get traction…</td></tr>';
   $('updated').textContent = new Date().toLocaleTimeString();
 }
 
@@ -148,6 +169,11 @@ function openCoin(c) {
       ${c.twitter ? `<a target="_blank" rel="noopener" href="${esc(c.twitter)}">X</a>` : ''}${c.telegram ? `<a target="_blank" rel="noopener" href="${esc(c.telegram)}">Telegram</a>` : ''}
       <button class="copy" data-copy="${c.mint}">Copy CA</button></div>
     ${c.description ? `<p class="muted">${esc(c.description)}</p>` : ''}
+    ${c.confidence ? `<h3>🎯 Confidence — <span class="c-${c.confidence.label}">${c.confidence.label} ${c.confidence.meter}</span> (${c.confidence.value})</h3>
+      <ul class="flags">${c.confidence.reasons.map((r) => `<li class="muted">${esc(r)}</li>`).join('')}</ul>
+      <p class="muted" style="font-size:12px">Confidence = how solid the data behind this score is, not the chance of profit.</p>` : ''}
+    ${c.x ? `<h3>🐦 X post</h3><p><a target="_blank" rel="noopener" href="${esc(c.x.url)}">@${esc(c.x.author)}</a>: ${esc(c.x.text)}<br>
+      <span class="muted">❤️ ${c.x.likes.toLocaleString()} · viral ${c.x.viral} · meme ${c.x.meme} · coin ${esc(c.x.how)} · ${c.x.coinsOnPost > 1 ? `#${c.x.rank} of ${c.x.coinsOnPost} coins on this post` : 'only coin on this post'}</span></p>` : ''}
     <h3>🛡 Safety — <span class="v-${sf.verdict}">${sf.verdict}</span> (${sf.score})</h3>
     <ul class="flags">${sf.flags.map((f) => `<li>${ICON[f.level]} ${esc(f.text)}</li>`).join('')}</ul>
     <h3>🧠 Narrative — ${n.score} <span class="muted">(${n.source === 'ai' ? 'AI' : 'rules'})</span></h3>
@@ -173,6 +199,8 @@ function openCoin(c) {
 document.addEventListener('click', (e) => {
   const cp = e.target.closest('[data-copy]');
   if (cp) { e.stopPropagation(); navigator.clipboard?.writeText(cp.dataset.copy); cp.textContent = 'Copied ✓'; setTimeout(() => (cp.textContent = 'Copy CA'), 1200); return; }
+  const op = e.target.closest('[data-open]');
+  if (op) { e.preventDefault(); const c = state.coins.find((x) => x.mint === op.dataset.open); if (c) openCoin(c); return; }
   const row = e.target.closest('tr.row');
   if (row) { const c = state.coins.find((x) => x.mint === row.dataset.mint); if (c) openCoin(c); }
 });

@@ -31,7 +31,7 @@ export function startServer({ engine, store, cfg, log = console }) {
     }
     if (url.pathname === '/api/state') {
       return json(res, {
-        status: engine.status(), coins: engine.ranked(80),
+        status: engine.status(), coins: engine.ranked(80), xPosts: engine.xPosts(12),
         alerts: store.recentAlerts(40), stats: store.stats(),
       });
     }
