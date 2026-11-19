@@ -37,12 +37,21 @@ export class Engine {
     else this.solUsd = 150;
   }
 
+  /** SOL/USD from the first source that answers (cloud servers are often blocked by one or another). */
   async #updateSolPrice() {
-    try {
-      const r = await fetch('https://api.coingecko.com/api/v3/simple/price?ids=solana&vs_currencies=usd',
-        { signal: AbortSignal.timeout(8000) });
-      this.solUsd = (await r.json()).solana.usd || this.solUsd;
-    } catch { /* keep last price; MC is shown in SOL if unknown */ }
+    const sources = [
+      ['https://api.coinbase.com/v2/prices/SOL-USD/spot', (j) => j.data.amount],
+      ['https://api.kraken.com/0/public/Ticker?pair=SOLUSD', (j) => Object.values(j.result)[0].c[0]],
+      ['https://api.coingecko.com/api/v3/simple/price?ids=solana&vs_currencies=usd', (j) => j.solana.usd],
+    ];
+    for (const [url, pick] of sources) {
+      try {
+        const r = await fetch(url, { signal: AbortSignal.timeout(8000) });
+        const price = Number(pick(await r.json()));
+        if (price > 0) { this.solUsd = price; return; }
+      } catch { /* try the next source */ }
+    }
+    if (!this.solUsd) this.log.warn('SOL price unavailable - market caps shown in SOL');
   }
 
   onCreate(msg) {
