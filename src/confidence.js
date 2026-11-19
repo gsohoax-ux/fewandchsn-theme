@@ -20,7 +20,7 @@ export function computeConfidence(coin, r, { runnersSeen = 0, history = null } =
   add(10, coin.ageSec() >= 120, null, 'coin is under 2 minutes old');
   add(10, runnersSeen >= 5, null, 'bot is still learning the current meta');
   add(10, Boolean(coin.meta && (coin.meta.description || coin.meta.twitter)), null, 'no coin description/socials loaded');
-  add(10, Boolean(r.x?.viral >= 50), 'linked to a verified viral X post', null);
+  add(10, Boolean(r.x?.viral >= 50), 'rides a viral X post', null);
 
   // Agreement between the three parts (big spread = mixed signals)
   const parts = [r.safety.score, r.narrative.score, r.momentum.score];

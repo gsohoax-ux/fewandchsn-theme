@@ -122,7 +122,8 @@ function render() {
     pill(`Helius ${s.helius ? 'on' : 'off'}`, s.helius, 'On-chain bundle & funding tracing') +
     pill(`AI ${s.ai.startsWith('claude') ? 'on' : 'off'}`, s.ai.startsWith('claude'), s.ai) +
     pill(`Alerts: ${s.notify.length ? s.notify.join(' + ') : 'off'}`, s.notify.length > 0) +
-    pill(`X ${s.x.on ? (s.x.error ? 'error' : 'on') : 'off'}`, s.x.on && !s.x.error, s.x.error || (s.x.on ? `${s.x.posts} posts tracked` : 'Add X_BEARER_TOKEN to watch X')) +
+    pill(s.x.on ? `X ${s.x.error ? 'error' : 'on'}` : s.x.radar ? 'X radar (free)' : 'X off', s.x.on ? !s.x.error : s.x.radar,
+      s.x.error || (s.x.on ? `${s.x.posts} posts tracked` : 'Free tweet radar: finds X posts many new coins launch on. Add X_BEARER_TOKEN for the full X watcher.')) +
     (s.paused ? '<span class="pill off">Alerts paused</span>' : '');
   const st = state.stats;
   $('stats').innerHTML = [
@@ -132,13 +133,13 @@ function render() {
   $('themes').innerHTML = s.hotThemes.length ? s.hotThemes.map((t) => `<span class="chip">${esc(t.word)} · ${t.count}</span>`).join('')
     : '<span class="muted">Learning from coins that pump…</span>';
   const xp = state.xPosts || [];
-  $('xcard').style.display = s.x.on || xp.length ? '' : 'none';
+  $('xcard').style.display = s.x.on || s.x.radar || xp.length ? '' : 'none';
   $('xposts').innerHTML = xp.length ? xp.map((p) => `<li>
       <div class="who"><a target="_blank" rel="noopener" href="${esc(p.url)}">@${esc(p.author)}</a><span>${age(Math.round((Date.now() - p.createdAt) / 1000))} ago</span></div>
       <div class="txt">${esc(p.text)}</div>
-      <div class="tags"><span>❤️ ${p.likes.toLocaleString()}</span><span>viral ${p.viral}</span><span>meme ${p.meme}${p.memeSource === 'ai' ? ' (AI)' : ''}</span>${p.idea ? `<span>💡 ${esc(p.idea)}</span>` : ''}</div>
+      <div class="tags">${p.origin === 'radar' ? `<span>📡 ${p.radarCoins} coins launched on it</span>` : `<span>❤️ ${p.likes.toLocaleString()}</span>`}<span>viral ${p.viral}</span><span>meme ${p.meme}${p.memeSource === 'ai' ? ' (AI)' : ''}</span>${p.idea ? `<span>💡 ${esc(p.idea)}</span>` : ''}</div>
       <div class="coins">${p.coins.length ? p.coins.map((c) => `<a href="#" data-open="${c.mint}">$${esc(c.symbol)}</a> <span class="${c.verdict ? 'v-' + c.verdict : 'muted'}">${c.score ?? '…'}${c.verdict ? ' ' + c.verdict : ''}</span>`).join(' · ') : '<span class="muted">No coin yet — watching Pump.fun</span>'}</div>
-    </li>`).join('') : '<li class="muted">Waiting for posts…</li>';
+    </li>`).join('') : `<li class="muted">${s.x.on ? 'Waiting for posts…' : `Tweet radar is watching: a post shows up here when ${'3+'} new coins link to it.`}</li>`;
   $('alerts').innerHTML = state.alerts.length ? state.alerts.map((a) => {
     const m = a.mc_sol ? a.peak_mc_sol / a.mc_sol : 1;
     return `<li><span><b>$${esc(a.symbol)}</b> <span class="muted">${a.score} · ${esc(a.stage)} · ${new Date(a.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span></span>
@@ -173,7 +174,7 @@ function openCoin(c) {
       <ul class="flags">${c.confidence.reasons.map((r) => `<li class="muted">${esc(r)}</li>`).join('')}</ul>
       <p class="muted" style="font-size:12px">Confidence = how solid the data behind this score is, not the chance of profit.</p>` : ''}
     ${c.x ? `<h3>🐦 X post</h3><p><a target="_blank" rel="noopener" href="${esc(c.x.url)}">@${esc(c.x.author)}</a>: ${esc(c.x.text)}<br>
-      <span class="muted">❤️ ${c.x.likes.toLocaleString()} · viral ${c.x.viral} · meme ${c.x.meme} · coin ${esc(c.x.how)} · ${c.x.coinsOnPost > 1 ? `#${c.x.rank} of ${c.x.coinsOnPost} coins on this post` : 'only coin on this post'}</span></p>` : ''}
+      <span class="muted">${c.x.origin === 'radar' ? `📡 ${c.x.radarCoins} coins launched on it` : `❤️ ${c.x.likes.toLocaleString()}`} · viral ${c.x.viral} · meme ${c.x.meme} · coin ${esc(c.x.how)} · ${c.x.coinsOnPost > 1 ? `#${c.x.rank} of ${c.x.coinsOnPost} coins on this post` : 'only coin on this post'}</span></p>` : ''}
     <h3>🛡 Safety — <span class="v-${sf.verdict}">${sf.verdict}</span> (${sf.score})</h3>
     <ul class="flags">${sf.flags.map((f) => `<li>${ICON[f.level]} ${esc(f.text)}</li>`).join('')}</ul>
     <h3>🧠 Narrative — ${n.score} <span class="muted">(${n.source === 'ai' ? 'AI' : 'rules'})</span></h3>

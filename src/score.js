@@ -36,7 +36,8 @@ function xLines(r) {
   if (!x) return [];
   return [
     `🐦 From X: @${x.author} — "${x.text.replace(/\s+/g, ' ').slice(0, 110)}${x.text.length > 110 ? '…' : ''}"`,
-    `   ❤️ ${x.likes.toLocaleString()} · viral ${x.viral} · meme ${x.meme} · coin ${x.how}` +
+    (x.origin === 'radar' ? `   📡 tweet radar: ${x.radarCoins} coins launched on this post · coin ${x.how}`
+      : `   ❤️ ${x.likes.toLocaleString()} · viral ${x.viral} · meme ${x.meme} · coin ${x.how}`) +
       (x.coinsOnPost > 1 ? ` · #${x.rank} of ${x.coinsOnPost} coins on this post` : ' · only coin on this post'),
   ];
 }

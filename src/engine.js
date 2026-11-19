@@ -19,6 +19,8 @@ export class Engine {
     this.solUsd = 0;
     this.counters = { launches: 0, evaluated: 0, alerts: 0, dropped: 0 };
     this.feedConnected = false;
+    this.radar = new Map(); // tweet id -> { author, mints: Map(mint -> ts) }
+    this.xwatch?.on('posts', () => this.#rematchAll());
   }
 
   start() {
@@ -27,10 +29,7 @@ export class Engine {
     this.feed.on('migrate', (m) => this.onMigrate(m));
     this.feed.on('status', (s) => { this.feedConnected = s.connected; });
     this.feed.start();
-    if (this.xwatch?.enabled) {
-      this.xwatch.on('posts', () => this.#rematchAll());
-      this.xwatch.start();
-    }
+    if (this.xwatch?.enabled) this.xwatch.start();
     setInterval(() => this.tick(), 2000).unref();
     setInterval(() => this.store.pruneOld(), 6 * 3600_000).unref();
     if (!this.cfg.demo) { this.#updateSolPrice(); setInterval(() => this.#updateSolPrice(), 5 * 60_000).unref(); }
@@ -70,7 +69,11 @@ export class Engine {
       const tg = socialKey(meta?.telegram);
       const ownSocial = sk && sk.kind !== 'tweet' ? sk.key : tg?.key ?? null;
       this.store.setSocials(coin.mint, ownSocial, sk?.kind === 'tweet' ? sk.key : null);
-      if (sk?.kind === 'tweet') this.xwatch?.trackLinkedPost(sk.key.slice('tweet:'.length));
+      if (sk?.kind === 'tweet') {
+        const tweetId = sk.key.slice('tweet:'.length);
+        this.xwatch?.trackLinkedPost(tweetId);
+        this.#radar(coin, tweetId, sk.author);
+      }
       coin.xMatch = this.#xMatch(coin);
     }).catch(() => { coin.meta = coin.meta ?? {}; });
   }
@@ -79,6 +82,24 @@ export class Engine {
     if (!this.xwatch?.posts.size || !coin.meta) return null;
     const m = this.xwatch.match(coin);
     return m && m.strength >= 0.5 ? m : null;
+  }
+
+  /** Free tweet radar: count new coins per linked X post. */
+  #radar(coin, id, author) {
+    if (!this.xwatch) return;
+    const now = Date.now();
+    const windowMs = this.cfg.radarWindowMin * 60_000;
+    let r = this.radar.get(id);
+    if (!r) { r = { author, mints: new Map() }; this.radar.set(id, r); }
+    r.mints.set(coin.mint, now);
+    for (const [m, t] of r.mints) if (now - t > windowMs) r.mints.delete(m);
+    if (this.radar.size > 5000) {
+      for (const [k, v] of this.radar) if ([...v.mints.values()].every((t) => now - t > windowMs)) this.radar.delete(k);
+    }
+    if (r.mints.size < this.cfg.radarMinCoins) return;
+    const coins = [...r.mints.keys()].map((m) => this.coins.get(m)).filter(Boolean);
+    if (coins.length < this.cfg.radarMinCoins) return;
+    if (!this.xwatch.addRadarPost({ id, author: r.author, coins, now })) this.#rematchAll();
   }
 
   #rematchAll() { for (const c of this.coins.values()) c.xMatch = this.#xMatch(c); }
@@ -92,6 +113,7 @@ export class Engine {
     return {
       id: p.id, url: p.url, author: p.author, text: p.text.slice(0, 160), likes: p.metrics.likes,
       reposts: p.metrics.retweets, viral: p.viral, meme: p.meme, idea: p.idea ?? '', how: m.how,
+      origin: p.origin, radarCoins: p.radarCoins ?? 0,
       strength: m.strength, rank: rivals.indexOf(coin) + 1, coinsOnPost: rivals.length,
     };
   }
@@ -226,7 +248,7 @@ export class Engine {
       const target = Math.round((40 + 0.3 * x.viral + 0.3 * x.meme) * (0.5 + x.strength / 2));
       if (target > narrative.score) {
         narrative = { ...narrative, score: Math.min(100, target),
-          summary: `Viral X post by @${x.author} (${x.likes.toLocaleString()} likes); ${narrative.summary}` };
+          summary: `${x.origin === 'radar' ? `X post by @${x.author} that ${x.radarCoins} coins launched on` : `Viral X post by @${x.author} (${x.likes.toLocaleString()} likes)`}; ${narrative.summary}` };
       }
     }
 
@@ -313,7 +335,7 @@ export class Engine {
     return this.xwatch.list(limit).map((p) => ({
       id: p.id, url: p.url, author: p.author, text: p.text.slice(0, 220), createdAt: p.createdAt,
       likes: p.metrics.likes, reposts: p.metrics.retweets, viral: p.viral, meme: p.meme, idea: p.idea ?? '',
-      memeSource: p.memeSource, origin: p.origin,
+      memeSource: p.memeSource, origin: p.origin, radarCoins: p.radarCoins ?? 0,
       coins: (byPost.get(p.id) ?? []).sort((a, b) => b.mcSol - a.mcSol).slice(0, 5),
     }));
   }
@@ -324,7 +346,8 @@ export class Engine {
       tracked: this.coins.size, ...this.counters, solUsd: this.solUsd,
       helius: Boolean(this.chain?.enabled), ai: this.ai?.enabled ? this.cfg.aiModel : (this.ai?.disabledReason || 'off'),
       notify: this.notifier.channels,
-      x: this.xwatch?.enabled ? { on: true, posts: this.xwatch.posts.size, error: this.xwatch.lastError } : { on: false },
+      x: this.xwatch?.enabled ? { on: true, posts: this.xwatch.posts.size, error: this.xwatch.lastError }
+        : { on: false, radar: Boolean(this.xwatch), posts: this.xwatch?.posts.size ?? 0 },
       hotThemes: this.trends.hotThemes(), alertMinScore: this.cfg.alertMinScore,
     };
   }

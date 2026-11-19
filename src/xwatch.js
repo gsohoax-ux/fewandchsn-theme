@@ -172,8 +172,7 @@ export class XWatcher extends EventEmitter {
     await this.#scoreMemeability(fresh);
     for (const p of fresh) this.posts.set(p.id, p);
 
-    // Forget old posts
-    for (const [id, p] of this.posts) if (now - p.createdAt > this.cfg.xMaxPostAgeH * 3600_000) this.posts.delete(id);
+    this.#prune(now);
 
     this.lastError = '';
     if (fresh.length) this.emit('posts', fresh);
@@ -208,6 +207,48 @@ export class XWatcher extends EventEmitter {
       this.notified.push(now);
       await this.notifier.post(p);
     }
+  }
+
+  #prune(now) {
+    for (const [id, p] of this.posts) if (now - p.createdAt > this.cfg.xMaxPostAgeH * 3600_000) this.posts.delete(id);
+  }
+
+  /**
+   * Free tweet radar: several new coins linking the same X post within a short time means the
+   * post is going viral - devs are racing to launch on it. Works without any X API key.
+   * Returns true when the post is new to the watcher.
+   */
+  addRadarPost({ id, author, coins, now = Date.now() }) {
+    const n = coins.length;
+    const counts = new Map();
+    for (const c of coins) for (const w of words(`${c.name} ${c.symbol}`)) counts.set(w, (counts.get(w) ?? 0) + 1);
+    const shared = [...counts].filter(([, k]) => k >= 2).sort((a, b) => b[1] - a[1]).map(([w]) => w);
+    const names = new Map();
+    for (const c of coins) names.set(c.name, (names.get(c.name) ?? 0) + 1);
+    const idea = [...names].sort((a, b) => b[1] - a[1])[0]?.[0] ?? '';
+    const viral = Math.min(95, 40 + n * 7);
+    const meme = Math.min(90, 50 + n * 6);
+    const text = `${n} new coins launched on this post: ${coins.slice(0, 6).map((c) => `$${c.symbol}`).join(', ')}`;
+
+    const existing = this.posts.get(id);
+    if (existing) {
+      existing.radarCoins = n;
+      if (existing.origin === 'radar') Object.assign(existing, { viral, meme, text, idea, keywords: shared.slice(0, 10) });
+      return false;
+    }
+    const p = {
+      id, url: `https://x.com/${author || 'i'}/status/${id}`, author: author || 'unknown', followers: 0, text,
+      createdAt: now, firstSeen: now, hasMedia: false, origin: 'radar', memeSource: 'radar', radarCoins: n,
+      metrics: { likes: 0, retweets: 0, quotes: 0, replies: 0, views: 0 }, viral, meme, idea, keywords: shared.slice(0, 10),
+    };
+    this.posts.set(id, p);
+    this.#prune(now);
+    this.emit('posts', [p]);
+    if (this.cfg.radarAlerts && this.notifier) {
+      this.notified = this.notified.filter((t) => now - t < 3600_000);
+      if (this.notified.length < 6) { this.notified.push(now); this.notifier.post(p); }
+    }
+    return true;
   }
 
   match(coin) { return this.enabled || this.posts.size ? matchCoin(coin, [...this.posts.values()]) : null; }

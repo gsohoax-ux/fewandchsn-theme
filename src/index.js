@@ -67,7 +67,7 @@ telegram.on('resume', async () => { engine.paused = false; return '▶️ Alerts
 log.info(`Memecoin bot starting${cfg.demo ? ' in DEMO mode' : ''}`);
 log.info(`  Helius (bundle tracing): ${chain.enabled ? 'on' : 'OFF - add HELIUS_API_KEY for accurate bundle detection'}`);
 log.info(`  AI narrative: ${ai.enabled ? cfg.aiModel : 'OFF - using rule-based narrative score'}`);
-log.info(`  X watcher: ${xwatch.enabled ? `on - watching ${cfg.xWatchAccounts.map((a) => '@' + a).join(', ')}${cfg.xSearchQuery ? ' + search' : ''}` : 'OFF - add X_BEARER_TOKEN to watch X for meme-able posts'}`);
+log.info(`  X watcher: ${xwatch.enabled ? `on - watching ${cfg.xWatchAccounts.map((a) => '@' + a).join(', ')}${cfg.xSearchQuery ? ' + search' : ''}` : 'free tweet radar only (add X_BEARER_TOKEN for the full X watcher)'}`);
 log.info(`  Phone alerts (ntfy): ${ntfy.enabled ? `on - in the ntfy app, subscribe to topic:  ${ntfy.topic}` : 'OFF'}`);
 if (telegram.enabled) log.info(`  Telegram: ${cfg.telegramChatId ? 'on' : 'token set - send /chatid to your bot to get your chat id'}`);
 

@@ -78,6 +78,15 @@ export class Notifier {
 
   /** A new X post that could become a meme coin. */
   async post(p) {
+    if (p.origin === 'radar') {
+      const title = `${this.prefix}📡 Tweet radar: ${p.radarCoins} coins launched on @${p.author}'s post`;
+      const message = `${p.text}\nThe post is likely going viral. You'll get an alert if the leading coin is rising and SAFE.`;
+      await Promise.all([
+        this.ntfy?.send({ title, message, priority: 3, click: p.url, actions: [{ label: 'Open post', url: p.url }] }),
+        this.telegram?.send(`<b>${title.replace(/[<>&]/g, '')}</b>\n${message.replace(/[<>&]/g, '')}\n${p.url}`),
+      ]);
+      return;
+    }
     const title = `${this.prefix}📣 Meme-able post by @${p.author} (meme ${p.meme})`;
     const message = [p.text.slice(0, 280), '',
       `❤️ ${p.metrics.likes.toLocaleString()} · 🔁 ${p.metrics.retweets.toLocaleString()}`,

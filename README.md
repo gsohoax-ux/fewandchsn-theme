@@ -47,6 +47,20 @@ It answers *"how much should I trust this score?"*, not *"will it go up?"*:
 
 Tap a coin on the dashboard to see exactly why its confidence is what it is.
 
+### 📡 Free tweet radar (always on, no key needed)
+
+Coin creators often launch on a viral tweet and put its link in the coin's socials. When
+**3 or more new coins link the same X post within an hour**, the post is probably blowing up.
+The radar then:
+
+- sends a **📡 Tweet radar** notification and puts the post in the dashboard's "Posts on X to watch",
+- matches every coin about it, by link or by name,
+- sends a **🐦 X NARRATIVE** alert for the **leading coin** on that post, but only if it is **rising and SAFE**.
+
+It can't see likes or views, and it only spots a post once coins launch on it. The paid X watcher
+below catches posts earlier. Tune it with `RADAR_MIN_COINS` (default 3), `RADAR_WINDOW_MIN`
+(default 60) and `RADAR_ALERTS` (1 or 0).
+
 ### 🐦 X watcher (optional, needs an X API key)
 
 - Watches X accounts you choose, plus an optional search, for **new posts that are blowing up**.

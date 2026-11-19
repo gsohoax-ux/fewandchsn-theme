@@ -51,6 +51,11 @@ export const config = {
   xMinMomentum: num('X_MIN_MOMENTUM', 50),
   xMinBuyers: num('X_MIN_BUYERS', 8),
 
+  // Free tweet radar: N coins linking the same X post within a window = viral post
+  radarMinCoins: num('RADAR_MIN_COINS', 3),
+  radarWindowMin: num('RADAR_WINDOW_MIN', 60),
+  radarAlerts: env('RADAR_ALERTS', '1') === '1',
+
   // Dashboard
   port: num('PORT', 8080),
   dashboardPassword: env('DASHBOARD_PASSWORD'),
