@@ -35,8 +35,8 @@ export const config = {
 
   // AI narrative
   anthropicKey: env('ANTHROPIC_API_KEY'),
-  aiModel: env('AI_MODEL', 'claude-opus-5-5'),
-  aiMaxCallsPerHour: num('AI_MAX_CALLS_PER_HOUR', 120),
+  aiModel: env('AI_MODEL', 'claude-haiku-5-5'),
+  aiMaxCallsPerHour: num('AI_MAX_CALLS_PER_HOUR', 20),
 
   // X (Twitter) watcher
   xBearerToken: env('X_BEARER_TOKEN'),
