@@ -37,7 +37,7 @@ export class Engine {
     this.feed.on('create', (m) => this.onCreate(m));
     this.feed.on('trade', (m) => this.onTrade(m));
     this.feed.on('migrate', (m) => this.onMigrate(m));
-    this.feed.on('status', (s) => { this.feedConnected = s.connected; });
+    this.feed.on('status', (s) => { this.feedConnected = s.connected; if (s.problem) this.feedProblem = s.problem; });
     this.feed.start();
     if (this.xwatch?.enabled) this.xwatch.start();
     this.trends?.start();
@@ -557,6 +557,8 @@ export class Engine {
   status() {
     return {
       demo: this.cfg.demo, feedConnected: this.feedConnected, paused: this.paused,
+      feedProblem: this.feedProblem ?? '', feedLastDataSec: this.feed.lastMsgAt ? Math.round((Date.now() - this.feed.lastMsgAt) / 1000) : null,
+      feedReconnects: this.feed.reconnects ?? 0,
       tracked: this.coins.size, ...this.counters, solUsd: this.solUsd,
       helius: Boolean(this.chain?.enabled), ai: this.ai?.enabled ? this.cfg.aiModel : (this.ai?.disabledReason || 'off'),
       notify: this.notifier.channels,

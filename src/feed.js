@@ -13,16 +13,49 @@ export class PumpPortalFeed extends EventEmitter {
     this.pendingUnsub = new Set();
     this.connected = false;
     this.backoff = 1000;
+    this.lastMsgAt = 0;
+    this.lastProblem = '';
+    this.reconnects = 0;
     setInterval(() => this.#flush(), 300).unref();
+    // Watchdog: a connection can stay "open" but stop delivering data. New coins launch every few
+    // seconds, so 90s of silence means the feed is stuck - drop it and reconnect.
+    setInterval(() => {
+      if (this.connected && Date.now() - this.lastMsgAt > 90_000) this.failCurrent?.('no data for 90s');
+    }, 15_000).unref();
   }
 
   start() { this.#connect(); }
 
+  /**
+   * One connection attempt. ANY way it can fail - error, close, a handshake that never completes,
+   * or (via the watchdog) silence - ends this attempt exactly once and schedules a fresh one.
+   * (Node's WebSocket does not fire "close" after a failed handshake, so relying on onclose alone
+   * could leave the bot offline forever.)
+   */
   #connect() {
     const ws = new WebSocket(this.url);
     this.ws = ws;
+    let finished = false;
+    const fail = (why) => {
+      if (finished) return;
+      finished = true;
+      clearTimeout(openTimer);
+      ws.onopen = ws.onmessage = ws.onclose = ws.onerror = null;
+      try { ws.close(); } catch { /* already gone */ }
+      this.connected = false;
+      this.reconnects++;
+      this.lastProblem = `${new Date().toISOString().slice(11, 19)} ${why}`;
+      this.emit('status', { connected: false, problem: this.lastProblem });
+      this.log.warn(`PumpPortal ${why} - reconnecting in ${this.backoff / 1000}s`);
+      setTimeout(() => this.#connect(), this.backoff);
+      this.backoff = Math.min(this.backoff * 2, 30_000);
+    };
+    this.failCurrent = fail;
+    const openTimer = setTimeout(() => fail('connection timed out'), 15_000);
+
     ws.onopen = () => {
-      this.connected = true; this.backoff = 1000;
+      clearTimeout(openTimer);
+      this.connected = true; this.backoff = 1000; this.lastMsgAt = Date.now();
       this.log.info('PumpPortal connected');
       this.emit('status', { connected: true });
       ws.send(JSON.stringify({ method: 'subscribeNewToken' }));
@@ -30,21 +63,24 @@ export class PumpPortalFeed extends EventEmitter {
       for (const m of this.watched) this.pendingSub.add(m);
     };
     ws.onmessage = (ev) => {
+      this.lastMsgAt = Date.now();
       let msg;
       try { msg = JSON.parse(ev.data); } catch { return; }
-      if (!msg.mint || !msg.txType) return; // subscription confirmations etc.
+      if (!msg.mint || !msg.txType) {
+        // Subscription confirmations are normal; anything that looks like an error is logged (rate limits, bans...)
+        const text = JSON.stringify(msg).slice(0, 300);
+        if (/error|limit|denied|invalid|banned|forbidden|exceed|too many/i.test(text)) {
+          this.lastProblem = `${new Date().toISOString().slice(11, 19)} server says: ${text}`;
+          this.log.warn(`PumpPortal ${this.lastProblem}`);
+        }
+        return;
+      }
       if (msg.txType === 'create') this.emit('create', msg);
       else if (msg.txType === 'buy' || msg.txType === 'sell') this.emit('trade', msg);
       else if (msg.txType === 'migrate' || msg.txType === 'migration') this.emit('migrate', msg);
     };
-    ws.onclose = () => {
-      this.connected = false;
-      this.emit('status', { connected: false });
-      this.log.warn(`PumpPortal disconnected - reconnecting in ${this.backoff / 1000}s`);
-      setTimeout(() => this.#connect(), this.backoff);
-      this.backoff = Math.min(this.backoff * 2, 30_000);
-    };
-    ws.onerror = () => { /* onclose follows */ };
+    ws.onclose = (ev) => fail(`closed (code ${ev?.code ?? '?'}${ev?.reason ? `, reason: ${ev.reason}` : ''})`);
+    ws.onerror = (ev) => fail(`connection error${ev?.message ? `: ${ev.message}` : ''}`);
   }
 
   watch(mint) { this.watched.add(mint); this.pendingUnsub.delete(mint); this.pendingSub.add(mint); }

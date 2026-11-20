@@ -180,7 +180,9 @@ function pill(label, on, title = '') { return `<span class="pill ${on ? 'on' : '
 function render() {
   const s = state.status;
   $('pills').innerHTML = (s.demo ? '<span class="pill demo">DEMO – fake coins</span>' : '') +
-    pill(s.feedConnected ? '● Feed live' : '○ Feed offline', s.feedConnected) +
+    pill(s.feedConnected ? '● Feed live' : '○ Feed offline', s.feedConnected,
+      `${s.feedLastDataSec != null ? `last data ${s.feedLastDataSec}s ago` : 'no data yet'} · ${s.feedReconnects} reconnects${s.feedProblem ? ' · last problem: ' + s.feedProblem : ''}`) +
+    (!s.feedConnected && s.feedProblem ? `<span class="pill off">${esc(s.feedProblem)}</span>` : '') +
     pill(`Helius ${s.helius ? 'on' : 'off'}`, s.helius, 'On-chain bundle & funding tracing') +
     pill(s.ai.startsWith('claude') ? `AI: ${aiName(s.ai)}` : 'AI off', s.ai.startsWith('claude'), s.ai) +
     pill(`Alerts: ${s.notify.length ? s.notify.join(' + ') : 'off'}`, s.notify.length > 0) +
