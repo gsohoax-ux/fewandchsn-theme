@@ -8,22 +8,58 @@
 //   - extra slippage for the delay between alert and fill (bots buy before you)
 import { quoteBuy, quoteSell } from './coin.js';
 
+/** Calendar day (YYYY-MM-DD) in the given time zone. */
+export function dayKey(ms, tz = 'UTC') {
+  const f = (zone) => new Intl.DateTimeFormat('en-CA', { timeZone: zone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(ms);
+  try { return f(tz); } catch { return f('UTC'); }
+}
+
 export class PaperTrader {
-  constructor({ cfg, store, log = console, onEvent = () => {} }) {
-    Object.assign(this, { cfg, store, log, onEvent });
+  constructor({ cfg, store, log = console, onEvent = () => {}, onNotify = async () => {}, getSolUsd = () => 0 }) {
+    Object.assign(this, { cfg, store, log, onEvent, onNotify, getSolUsd });
     this.positions = new Map(); // mint -> position
+    // Daily budget mode: a fresh $ budget every day (e.g. $30), with a low-balance warning
+    this.daily = cfg.paperDailyUsd > 0;
+    this.account = this.daily ? `daily:${cfg.paperDailyUsd}` : `sol:${cfg.paperStartSol}`;
     const saved = store.getKv('paper');
-    if (saved && saved.startSol === cfg.paperStartSol) {
-      this.cash = saved.cash;
-      this.equityHist = saved.equityHist ?? [];
+    const same = saved && (saved.account ? saved.account === this.account : !this.daily && saved.startSol === cfg.paperStartSol);
+    if (same) {
+      Object.assign(this, {
+        cash: saved.cash, startSol: saved.startSol, equityHist: saved.equityHist ?? [], day: saved.day ?? null,
+        dayOpenedAt: saved.dayOpenedAt ?? 0, lowAlerted: Boolean(saved.lowAlerted), days: saved.days ?? [],
+      });
       // Positions from before a restart can't be followed any more: close them at their last value
       for (const p of saved.positions ?? []) this.#record(p, p.lastValue ?? 0, 'closed by restart', Date.now(), p.lastMc ?? p.entryMc);
     } else {
-      this.cash = cfg.paperStartSol;
-      this.equityHist = [];
+      Object.assign(this, {
+        cash: this.daily ? 0 : cfg.paperStartSol, startSol: this.daily ? 0 : cfg.paperStartSol, equityHist: [],
+        day: null, dayOpenedAt: 0, lowAlerted: false, days: [],
+      });
     }
-    this.startSol = cfg.paperStartSol;
     this.lastSnap = 0;
+  }
+
+  /** Start a new day: close yesterday's positions, record the result, reload today's budget. */
+  #rollover(coins, key, now) {
+    const solUsd = this.getSolUsd();
+    if (!(solUsd > 0)) return; // need the SOL price to turn $ into SOL; try again shortly
+    if (this.day) {
+      for (const pos of [...this.positions.values()]) this.close(pos, coins.get(pos.mint), coins, 'end of day', now);
+      const trades = this.store.paperTradesSince(this.dayOpenedAt).length;
+      const endUsd = this.cash * solUsd;
+      const startUsd = this.cfg.paperDailyUsd;
+      this.days.unshift({ day: this.day, startUsd, endUsd, trades });
+      this.days = this.days.slice(0, 60);
+      const pct = (endUsd / startUsd - 1) * 100;
+      this.onNotify(`📄 Paper day ${this.day}: $${startUsd.toFixed(2)} → $${endUsd.toFixed(2)} (${pct >= 0 ? '+' : ''}${pct.toFixed(1)}%) · ${trades} trade${trades === 1 ? '' : 's'}`);
+    }
+    this.day = key;
+    this.dayOpenedAt = now;
+    this.cash = this.startSol = this.cfg.paperDailyUsd / solUsd;
+    this.lowAlerted = false;
+    this.equityHist = [[now, +this.cash.toFixed(4)]];
+    this.onEvent('EXECUTOR', null, `new day ${key}: paper budget $${this.cfg.paperDailyUsd} (${this.cash.toFixed(3)} SOL)`);
+    this.#save(coins);
   }
 
   get enabled() { return this.cfg.paper; }
@@ -54,6 +90,8 @@ export class PaperTrader {
   /** Buy on an alert. */
   open(coin, { stage, score }, coins, now = Date.now()) {
     if (!this.enabled || this.positions.has(coin.mint) || coin.migrated) return null;
+    if (this.daily && !this.day) return this.#skip(coin, 'waiting for the SOL price to load today\'s budget');
+    if (this.daily && this.cfg.paperStopAtLow && this.lowAlerted) return this.#skip(coin, `budget under $${this.cfg.paperLowUsd} - done for today`);
     if (this.positions.size >= this.cfg.paperMaxOpen) return this.#skip(coin, `max ${this.cfg.paperMaxOpen} open positions`);
     const size = Math.min(this.cash, this.equity(coins) * (this.cfg.paperSizePct / 100));
     if (size < this.cfg.paperTxFeeSol * 5) return this.#skip(coin, 'not enough paper cash');
@@ -93,6 +131,23 @@ export class PaperTrader {
 
   /** Time stop, coins the bot stopped tracking, and the equity chart. */
   tick(coins, now = Date.now()) {
+    if (this.daily) {
+      const key = dayKey(now, this.cfg.paperTz);
+      if (key !== this.day) this.#rollover(coins, key, now);
+      // Warn once a day when the balance drops under the low mark
+      const solUsd = this.getSolUsd();
+      if (this.day && !this.lowAlerted && solUsd > 0) {
+        const eqUsd = this.equity(coins) * solUsd;
+        if (eqUsd < this.cfg.paperLowUsd) {
+          this.lowAlerted = true;
+          const msg = `⚠️ Paper budget low: $${eqUsd.toFixed(2)} left of today's $${this.cfg.paperDailyUsd}` +
+            (this.cfg.paperStopAtLow ? ' - no more paper buys today' : '');
+          this.onEvent('RISK', null, msg, 'bad');
+          this.onNotify(msg);
+          this.#save(coins);
+        }
+      }
+    }
     for (const pos of [...this.positions.values()]) {
       const coin = coins.get(pos.mint);
       if (!coin) { this.close(pos, null, coins, 'coin stopped trading', now); continue; }
@@ -127,16 +182,19 @@ export class PaperTrader {
 
   #save(coins) {
     const positions = [...this.positions.values()].map((p) => ({ ...p, lastValue: this.valueOf(p, coins?.get(p.mint)) }));
-    this.store.setKv('paper', { startSol: this.startSol, cash: this.cash, equityHist: this.equityHist, positions });
+    this.store.setKv('paper', { account: this.account, startSol: this.startSol, cash: this.cash, equityHist: this.equityHist, positions,
+      day: this.day, dayOpenedAt: this.dayOpenedAt, lowAlerted: this.lowAlerted, days: this.days });
   }
 
   view(coins, solUsd = 0) {
     const eq = this.equity(coins);
-    const closed = this.store.paperTradesSince(0);
+    const closed = this.store.paperTradesSince(this.daily ? this.dayOpenedAt || Date.now() : 0);
     const wins = closed.filter((t) => t.proceeds_sol > t.cost_sol);
     const pnls = closed.map((t) => t.proceeds_sol / t.cost_sol - 1);
     return {
-      enabled: this.enabled, startSol: this.startSol, equitySol: eq, cashSol: this.cash, solUsd,
+      enabled: this.enabled, startSol: this.startSol || 1e-9, ready: !this.daily || Boolean(this.day),
+      daily: this.daily ? { budgetUsd: this.cfg.paperDailyUsd, lowUsd: this.cfg.paperLowUsd, day: this.day, lowHit: this.lowAlerted,
+        stopAtLow: this.cfg.paperStopAtLow, days: this.days.slice(0, 14) } : null, equitySol: eq, cashSol: this.cash, solUsd,
       pnlSol: eq - this.startSol, pnlPct: (eq / this.startSol - 1) * 100,
       trades: closed.length, winRate: closed.length ? Math.round((wins.length / closed.length) * 100) : 0,
       best: pnls.length ? Math.max(...pnls) * 100 : 0, worst: pnls.length ? Math.min(...pnls) * 100 : 0,
@@ -147,7 +205,7 @@ export class PaperTrader {
         return { mint: p.mint, symbol: p.symbol, costSol: p.costSol, valueSol: v, pnlPct: (v / p.costSol - 1) * 100,
           openedAt: p.openedAt, trailing: p.trailing };
       }),
-      recent: this.store.paperTrades(15).map((t) => ({ symbol: t.symbol, mint: t.mint, why: t.why, closedAt: t.closed_at,
+      recent: this.store.paperTrades(15).filter((t) => !this.daily || t.closed_at >= this.dayOpenedAt).map((t) => ({ symbol: t.symbol, mint: t.mint, why: t.why, closedAt: t.closed_at,
         pnlPct: (t.proceeds_sol / t.cost_sol - 1) * 100, pnlSol: t.proceeds_sol - t.cost_sol })),
       history: this.equityHist.slice(-720),
     };

@@ -70,15 +70,19 @@ export const config = {
 
   // Paper trading (fake money) - tests whether following the alerts would make money
   paper: env('PAPER', '1') === '1',
-  paperStartSol: num('PAPER_START_SOL', 2),          // changing this starts a fresh paper account
-  paperSizePct: num('PAPER_SIZE_PCT', 8),            // % of equity per trade
-  paperMaxOpen: num('PAPER_MAX_OPEN', 5),
+  paperStartSol: num('PAPER_START_SOL', 2),          // used only when PAPER_DAILY_USD is 0
+  paperDailyUsd: num('PAPER_DAILY_USD', 30),         // fresh $ budget every day (0 = one running account in SOL)
+  paperLowUsd: num('PAPER_LOW_USD', 10),             // phone alert when today's balance drops under this
+  paperStopAtLow: env('PAPER_STOP_AT_LOW', '0') === '1', // also stop paper buying for the day at that point
+  paperTz: env('PAPER_TZ', 'America/Chicago'),       // when a new day starts
+  paperSizePct: num('PAPER_SIZE_PCT', 20),           // % of equity per trade ($30 budget -> about $6 a trade)
+  paperMaxOpen: num('PAPER_MAX_OPEN', 4),
   paperStopPct: num('PAPER_STOP_PCT', 25),           // sell if down this %
   paperTrailStartPct: num('PAPER_TRAIL_START_PCT', 30), // trailing stop starts after this gain
   paperTrailPct: num('PAPER_TRAIL_PCT', 20),         // ...and sells after this drop from the best value
   paperMaxHoldMin: num('PAPER_MAX_HOLD_MIN', 90),
   paperFeePct: num('PAPER_FEE_PCT', 1.25),           // Pump.fun trading fee per side
-  paperTxFeeSol: num('PAPER_TX_FEE_SOL', 0.002),     // network + priority fee per transaction
+  paperTxFeeSol: num('PAPER_TX_FEE_SOL', 0.0015),    // network + priority fee per transaction (match your Padre setting)
   paperSlippagePct: num('PAPER_SLIPPAGE_PCT', 3),    // extra slippage from being slower than snipers
 
   // Dashboard

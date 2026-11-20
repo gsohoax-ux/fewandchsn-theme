@@ -49,13 +49,17 @@ can see in dollars whether following the alerts would make money. **Nothing touc
 
 | Setting | Default | Meaning |
 |---|---|---|
-| `PAPER_START_SOL` | 2 | Starting fake balance. Changing it starts a fresh account. |
-| `PAPER_SIZE_PCT` | 8 | % of the balance per trade |
-| `PAPER_MAX_OPEN` | 5 | Max positions at once |
+| `PAPER_DAILY_USD` | 30 | Fresh fake budget **every day**. Yesterday's positions are closed at midnight and you get a phone summary of the day. `0` uses one running account instead. |
+| `PAPER_LOW_USD` | 10 | Phone alert (once a day) when today's balance drops under this |
+| `PAPER_STOP_AT_LOW` | 0 | `1` also stops paper buying for the rest of the day at that point |
+| `PAPER_TZ` | America/Chicago | When a new day starts |
+| `PAPER_START_SOL` | 2 | Starting balance, only used when `PAPER_DAILY_USD` is 0 |
+| `PAPER_SIZE_PCT` | 20 | % of the balance per trade (about $6 of a $30 budget) |
+| `PAPER_MAX_OPEN` | 4 | Max positions at once |
 | `PAPER_STOP_PCT` | 25 | Sell if down this much |
 | `PAPER_TRAIL_START_PCT` / `PAPER_TRAIL_PCT` | 30 / 20 | After +30%, sell when it drops 20% from its best |
 | `PAPER_MAX_HOLD_MIN` | 90 | Sell after this many minutes regardless |
-| `PAPER_FEE_PCT`, `PAPER_TX_FEE_SOL`, `PAPER_SLIPPAGE_PCT` | 1.25, 0.002, 3 | Costs |
+| `PAPER_FEE_PCT`, `PAPER_TX_FEE_SOL`, `PAPER_SLIPPAGE_PCT` | 1.25, 0.0015, 3 | Costs. Set the tx fee to match your Padre priority fee. |
 | `PAPER` | 1 | 0 turns paper trading off |
 
 A −6% stop like some bots advertise would trigger almost immediately, because fees and slippage alone

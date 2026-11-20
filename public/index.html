@@ -124,7 +124,7 @@
 <main>
   <section>
     <div class="stats" id="stats"></div>
-    <div class="card" id="papercard" style="margin-bottom:16px"><h2><span>📄 Paper trading</span><span class="muted">fake money · follows every alert</span></h2><div class="paper" id="paper"></div></div>
+    <div class="card" id="papercard" style="margin-bottom:16px"><h2><span>📄 Paper trading</span><span class="muted">fake money · real coins · follows every alert</span></h2><div class="paper" id="paper"></div></div>
     <div class="card">
       <h2><span>Live ranking</span><span id="updated" class="muted"></span></h2>
       <div style="overflow-x:auto">
@@ -208,7 +208,9 @@ function render() {
     $('paper').innerHTML = `
       <div class="row"><span class="big">${usd(P.equitySol)}</span>
         <span class="${P.pnlSol >= 0 ? 'up' : 'down'}">${P.pnlSol >= 0 ? '+' : ''}${usd(P.pnlSol)} (${P.pnlPct >= 0 ? '+' : ''}${P.pnlPct.toFixed(1)}%)</span>
-        <span class="muted">${(P.equitySol / P.startSol).toFixed(2)}x · started ${usd(P.startSol)}</span></div>
+        <span class="muted">${(P.equitySol / P.startSol).toFixed(2)}x · ${P.daily ? `today's budget $${P.daily.budgetUsd}` : `started ${usd(P.startSol)}`}</span></div>
+      ${P.daily ? `<div class="muted" style="font-size:12px">${P.ready ? `Day ${esc(P.daily.day)} · resets at midnight · phone alert under $${P.daily.lowUsd}` : 'Loading the SOL price to start today\'s budget…'}
+        ${P.daily.lowHit ? `<span class="down"> · ⚠️ under $${P.daily.lowUsd}${P.daily.stopAtLow ? ', done for today' : ''}</span>` : ''}</div>` : ''}
       <svg viewBox="0 0 100 70" preserveAspectRatio="none"><line x1="0" x2="100" y1="${base}" y2="${base}" stroke="var(--line)" stroke-dasharray="2 2" vector-effect="non-scaling-stroke"/>
         <polyline points="${pts}" fill="none" stroke="${col}" stroke-width="2" vector-effect="non-scaling-stroke"/></svg>
       <div class="row muted" style="font-size:12px"><span>${P.trades} closed trade${P.trades === 1 ? '' : 's'}</span><span>win rate ${P.winRate}%</span>
@@ -216,6 +218,8 @@ function render() {
       ${s.demo ? '<div class="rules" style="color:var(--yellow)">Demo coins are made up and pump far more than real ones, so these demo results mean nothing.</div>' : ''}
       ${P.open.length ? `<ul class="mini">${P.open.map((o) => `<li><span><a href="#" data-open="${o.mint}" style="color:var(--text)">$${esc(o.symbol)}</a> <span class="muted">open ${age(Math.round((Date.now() - o.openedAt) / 1000))}${o.trailing ? ' · trailing' : ''}</span></span><span class="${o.pnlPct >= 0 ? 'up' : 'down'}">${o.pnlPct >= 0 ? '+' : ''}${o.pnlPct.toFixed(1)}%</span></li>`).join('')}</ul>` : '<div class="muted" style="font-size:13px;margin-top:6px">No open positions — waiting for the next alert.</div>'}
       ${P.recent.length ? `<ul class="mini">${P.recent.slice(0, 5).map((t) => `<li><span>$${esc(t.symbol)} <span class="muted">${esc(t.why)}</span></span><span class="${t.pnlPct >= 0 ? 'up' : 'down'}">${t.pnlPct >= 0 ? '+' : ''}${t.pnlPct.toFixed(1)}%</span></li>`).join('')}</ul>` : ''}
+      ${P.daily?.days.length ? `<ul class="mini">${P.daily.days.slice(0, 7).map((d) => { const pc = (d.endUsd / d.startUsd - 1) * 100;
+        return `<li><span>${esc(d.day)} <span class="muted">${d.trades} trade${d.trades === 1 ? '' : 's'}</span></span><span class="${pc >= 0 ? 'up' : 'down'}">$${d.startUsd.toFixed(0)} → $${d.endUsd.toFixed(2)} (${sgn(pc, 1)}%)</span></li>`; }).join('')}</ul>` : ''}
       <div class="rules">Rules: ${P.rules.sizePct}% per trade · stop −${P.rules.stopPct}% · trailing ${P.rules.trailPct}% after +${P.rules.trailStartPct}% · max ${P.rules.maxHoldMin} min · fees, slippage and price impact included</div>`;
   }
 
