@@ -151,6 +151,20 @@ You get a **📈 Trend** phone alert for strong trends (meme potential ≥ `TREN
 **📈 TREND** coin alert when the **leading coin** on a trend is **rising and SAFE**. The dashboard shows
 **Trends to watch**, with each site's status and the coins found for each trend.
 
+### 🚀 Quick-deploy coins and 🪞 copies
+
+Tools like **J7** let people launch a coin seconds after a tweet, often copying ("vamping") another
+coin's name, image and links. The bot tags:
+- **🚀 Quick-deploy coins:** the coin's details mention a deploy tool (e.g. "Deployed using
+  j7tracker.io"). Add more tool names with `DEPLOY_TOOL_PATTERNS`, comma separated.
+- **🪞 Copies:** the **exact same image** as a coin from the last 24h (matched on the image's IPFS
+  fingerprint), or the same name and ticker.
+
+They appear as ℹ️ notes on the coin and as badges on the Board. **They don't change the score yet.**
+Paper trading reports them separately ("🚀 quick-deploy coins", "🪞 copies of other coins"), and
+self-learning uses them as two extra signals, so the data decides whether they're good or bad. When
+several copies pile onto one tweet or trend, the alerts already go only to the leading coin.
+
 ### 📡 Free tweet radar (always on, no key needed)
 
 Coin creators often launch on a viral tweet and put its link in the coin's socials. When

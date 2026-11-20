@@ -39,6 +39,8 @@ export class Store {
     for (const c of ['entry_progress', 'mfe', 'mae', 'hurdle', 'regime']) {
       if (!pcols.has(c)) this.db.exec(`ALTER TABLE paper_trades ADD COLUMN ${c} REAL`);
     }
+    if (!pcols.has('deploy_tool')) this.db.exec('ALTER TABLE paper_trades ADD COLUMN deploy_tool TEXT');
+    if (!pcols.has('vamp')) this.db.exec('ALTER TABLE paper_trades ADD COLUMN vamp INTEGER');
     const q = (sql) => this.db.prepare(sql);
     this.s = {
       addLaunch: q(`INSERT OR IGNORE INTO launches (mint, creator, symbol, name, social_key, tweet_key, created_at) VALUES (?,?,?,?,?,?,?)`),
@@ -62,7 +64,8 @@ export class Store {
       devHistory: q(`SELECT COUNT(*) finished, SUM(rugged) rugged, SUM(graduated) migrated FROM launches
                      WHERE creator = ? AND mint != ? AND rugged IS NOT NULL`),
       addPaper: q(`INSERT INTO paper_trades (mint, symbol, opened_at, closed_at, cost_sol, proceeds_sol, why, stage, score,
-                   entry_mc, exit_mc, entry_progress, mfe, mae, hurdle, regime) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`),
+                   entry_mc, exit_mc, entry_progress, mfe, mae, hurdle, regime, deploy_tool, vamp)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`),
       paperTrades: q(`SELECT * FROM paper_trades ORDER BY closed_at DESC LIMIT ?`),
       paperSince: q(`SELECT * FROM paper_trades WHERE closed_at >= ?`),
       getKv: q(`SELECT v FROM kv WHERE k = ?`),
@@ -118,7 +121,7 @@ export class Store {
   // ---- paper trading ----
   addPaperTrade(t) {
     this.s.addPaper.run(t.mint, t.symbol, t.openedAt, t.closedAt, t.costSol, t.proceedsSol, t.why, t.stage, t.score, t.entryMc, t.exitMc,
-      t.entryProgress ?? null, t.mfe ?? null, t.mae ?? null, t.hurdle ?? null, t.regime ?? null);
+      t.entryProgress ?? null, t.mfe ?? null, t.mae ?? null, t.hurdle ?? null, t.regime ?? null, t.deployTool ?? null, t.vamp ?? 0);
   }
   paperTrades(limit = 50) { return this.s.paperTrades.all(limit); }
   paperTradesSince(ms) { return this.s.paperSince.all(ms); }

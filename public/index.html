@@ -262,7 +262,7 @@ function render() {
   const B = state.board;
   if (B) {
     const row = (c) => `<li data-open="${c.mint}">
-      <span><b>${c.x ? '🐦 ' : ''}${c.trend ? '📈 ' : ''}$${esc(c.symbol)}</b> <span class="sub">${esc(c.name).slice(0, 22)}</span></span>
+      <span><b>${c.x ? '🐦 ' : ''}${c.trend ? '📈 ' : ''}${c.deployTool ? '<span title="Launched with ' + esc(c.deployTool) + '">🚀</span> ' : ''}${c.copy ? '<span title="Copy of an earlier coin">🪞</span> ' : ''}$${esc(c.symbol)}</b> <span class="sub">${esc(c.name).slice(0, 22)}</span></span>
       <span>${c.score != null ? `<span class="sc ${c.verdict === 'AVOID' ? 's-r' : c.score >= 70 ? 's-g' : c.score >= 50 ? 's-y' : 's-n'}">${c.score}</span>` : '<span class="sub">…</span>'}</span>
       <span class="sub">${mc(c.mcSol)} · ${c.progress.toFixed(0)}% · ${age(c.ageSec)} · ${c.buyers} buyers</span>
       <span class="sub ${c.verdict ? 'v-' + c.verdict : ''}">${c.alerted ? '🔔 ' : ''}${c.verdict ?? ''}</span></li>`;
@@ -320,7 +320,7 @@ function render() {
     <tr class="row ${c.alert ? 'alerted' : ''}" data-mint="${c.mint}">
       <td><span class="score ${sc(c)}">${c.score}</span></td>
       <td class="hide-sm">${c.confidence ? `<div class="conf c-${c.confidence.label}"><b>${c.confidence.label}</b> ${c.confidence.meter}</div>` : ''}</td>
-      <td><div class="tick">${c.x ? '<span title="Rides an X post">🐦</span> ' : ''}$${esc(c.symbol)}${c.migrated ? ' 🎓' : ''}${c.devSold ? ' <span title="dev sold" class="muted">·ds</span>' : ''}</div><div class="nm">${esc(c.name)}</div></td>
+      <td><div class="tick">${c.deployTool ? `<span title="Launched with ${esc(c.deployTool)}">🚀</span> ` : ''}${c.copyOf ? `<span title="Copy of $${esc(c.copyOf.symbol)}">🪞</span> ` : ''}${c.x ? '<span title="Rides an X post">🐦</span> ' : ''}$${esc(c.symbol)}${c.migrated ? ' 🎓' : ''}${c.devSold ? ' <span title="dev sold" class="muted">·ds</span>' : ''}</div><div class="nm">${esc(c.name)}</div></td>
       <td class="v-${c.safety.verdict}">${c.safety.verdict}</td>
       <td class="hide-sm">${c.narrative.score}</td>
       <td class="hide-sm">${c.momentum.score}</td>

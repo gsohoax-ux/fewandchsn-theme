@@ -94,7 +94,7 @@ export class PaperTrader {
   }
 
   /** Buy on an alert. */
-  open(coin, { stage, score }, coins, now = Date.now()) {
+  open(coin, { stage, score, deployTool = null, vamp = false }, coins, now = Date.now()) {
     if (!this.enabled || this.positions.has(coin.mint) || coin.migrated) return null;
     if (this.daily && !this.day) return this.#skip(coin, 'waiting for the SOL price to load today\'s budget');
     if (this.daily && this.cfg.paperStopAtLow && this.lowAlerted) return this.#skip(coin, `budget under $${this.cfg.paperLowUsd} - done for today`);
@@ -112,7 +112,7 @@ export class PaperTrader {
     const pos = { mint: coin.mint, symbol: coin.symbol, name: coin.name, openedAt: now, costSol: size, tokens,
       entryMc: coin.mcSol, peakMc: coin.mcSol, lowMc: coin.mcSol, entryProgress: coin.progress, stage, score,
       regime: this.getRegime?.()?.rate ?? null, peakValue: 0, lastValue: 0, lastMc: coin.mcSol, trailing: false,
-      halfTaken: false, migratedAt: null };
+      halfTaken: false, migratedAt: null, deployTool, vamp };
     pos.peakValue = pos.lastValue = this.valueOf(pos, coin);
     pos.hurdle = 1 - pos.lastValue / size; // what the price must rise just to break even
     this.positions.set(coin.mint, pos);
@@ -233,7 +233,8 @@ export class PaperTrader {
     this.store.addPaperTrade({ mint: pos.mint, symbol: pos.symbol, openedAt: pos.openedAt, closedAt: now,
       costSol: pos.costSol, proceedsSol: proceeds, why, stage: pos.stage, score: pos.score, entryMc: pos.entryMc, exitMc,
       entryProgress: pos.entryProgress ?? null, mfe: pos.peakMc ? pos.peakMc / pos.entryMc - 1 : null,
-      mae: pos.lowMc ? pos.lowMc / pos.entryMc - 1 : null, hurdle: pos.hurdle ?? null, regime: pos.regime ?? null });
+      mae: pos.lowMc ? pos.lowMc / pos.entryMc - 1 : null, hurdle: pos.hurdle ?? null, regime: pos.regime ?? null,
+      deployTool: pos.deployTool ?? null, vamp: pos.vamp ? 1 : 0 });
     if (why === 'closed by restart') this.cash += proceeds;
   }
 
@@ -253,6 +254,16 @@ export class PaperTrader {
       const g = groups.get(key) ?? { key, n: 0, wins: 0, cost: 0, proceeds: 0 };
       g.n++; g.cost += t.cost_sol; g.proceeds += t.proceeds_sol; if (t.proceeds_sol > t.cost_sol) g.wins++;
       groups.set(key, g);
+    }
+    // Extra rows: quick-deploy coins and copies vs the rest
+    for (const t of this.store.paperTradesSince(0)) {
+      if (t.why === 'closed by restart') continue;
+      for (const [key, hit] of [['🚀 quick-deploy coins', Boolean(t.deploy_tool)], ['🪞 copies of other coins', Boolean(t.vamp)]]) {
+        if (!hit) continue;
+        const g = groups.get(key) ?? { key, n: 0, wins: 0, cost: 0, proceeds: 0 };
+        g.n++; g.cost += t.cost_sol; g.proceeds += t.proceeds_sol; if (t.proceeds_sol > t.cost_sol) g.wins++;
+        groups.set(key, g);
+      }
     }
     return [...groups.values()].sort((a, b) => b.n - a.n)
       .map((g) => ({ key: g.key, trades: g.n, winRate: Math.round((g.wins / g.n) * 100), netPct: (g.proceeds / g.cost - 1) * 100 }));

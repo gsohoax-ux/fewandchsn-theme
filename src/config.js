@@ -65,6 +65,9 @@ export const config = {
   trendAlerts: env('TREND_ALERTS', '1') === '1',
   trendAlertMin: num('TREND_ALERT_MIN', 65),             // meme potential needed for a phone alert about a trend
 
+  // Extra text that marks a quick-deploy tool in a coin's details (J7 and "deployed using ..." are built in)
+  deployToolPatterns: list('DEPLOY_TOOL_PATTERNS'),
+
   // Self-learning
   learnTarget: num('LEARN_TARGET', 1.5),             // "a hit" = coin reached this multiple after scoring
   learnHorizonMin: num('LEARN_HORIZON_MIN', 120),    // how long after scoring we watch the outcome

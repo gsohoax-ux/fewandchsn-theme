@@ -32,6 +32,8 @@ export const FEATURES = [
   ['dexpaid', 'Dex paid'],
   ['devsold', 'Dev sold'],
   ['mid', 'Scored later on the curve'],
+  ['deploytool', 'Launched with a quick-deploy tool (J7 etc.)'],
+  ['vamp', 'Copy of an earlier coin'],
 ];
 
 /** Turn a scored coin into numbers between 0 and 1. */
@@ -47,6 +49,7 @@ export function featurize(coin, r, stage) {
     holders: (m.holders ?? 0) / 200, drawdown: (m.drawdownPct ?? 0) / 100, age: coin.ageSec() / 1800,
     twitter: meta.twitter ? 1 : 0, telegram: meta.telegram ? 1 : 0, website: meta.website ? 1 : 0,
     xpost: r.x ? 1 : 0, dexpaid: r.dexPaid ? 1 : 0, devsold: coin.devSold ? 1 : 0, mid: stage === 'mid' || stage === 'final' ? 1 : 0,
+    deploytool: coin.deployTool ? 1 : 0, vamp: coin.copyOf ? 1 : 0,
   };
   return FEATURES.map(([k]) => clamp01(f[k]));
 }
@@ -96,7 +99,8 @@ export class Learner {
     const rows = this.store.doneSamples(this.cfg.learnMaxSamples);
     const target = this.cfg.learnTarget;
     const data = rows.map((r) => ({ x: JSON.parse(r.features), y: r.mc_sol > 0 && r.peak_mc_sol / r.mc_sol >= target ? 1 : 0, at: r.at }))
-      .filter((d) => d.x.length === FEATURES.length)
+      .filter((d) => d.x.length <= FEATURES.length)
+      .map((d) => (d.x.length < FEATURES.length ? { ...d, x: [...d.x, ...new Array(FEATURES.length - d.x.length).fill(0)] } : d))
       .sort((a, b) => a.at - b.at);
     const pos = data.reduce((a, d) => a + d.y, 0);
     if (data.length < this.cfg.learnMinSamples || pos < 15) {

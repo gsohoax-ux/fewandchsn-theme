@@ -151,7 +151,8 @@ export class DemoFeed extends EventEmitter {
     this.emit('create', { signature: createSig, mint, traderPublicKey: creator, txType: 'create',
       initialBuy: devTokens, solAmount: devBuy, vTokensInBondingCurve: vTokens, vSolInBondingCurve: vSol,
       marketCapSol: (vSol / vTokens) * 1e9, name, symbol, uri: '',
-      _meta: { description, twitter: (Math.random() < 0.6 && this.xSource?.randomPostFor(symbol)?.url) || tw, telegram: Math.random() < 0.5 ? `https://t.me/${symbol.toLowerCase()}` : '', website: '' } });
+      _meta: { description: description + (Math.random() < 0.3 ? ' Deployed using https://j7tracker.io' : ''),
+        image: Math.random() < 0.5 ? `https://ipfs.io/ipfs/Qm${symbol}DemoImage00000000000000000000000` : '', twitter: (Math.random() < 0.6 && this.xSource?.randomPostFor(symbol)?.url) || tw, telegram: Math.random() < 0.5 ? `https://t.me/${symbol.toLowerCase()}` : '', website: '' } });
 
     // bundle: several fresh wallets, same funder, same block as create
     const insiders = [];

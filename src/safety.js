@@ -179,6 +179,10 @@ export function analyzeSafety(coin, chainData, ctx) {
   // 6. Recycled socials (same X/Telegram link used by another coin)
   if (ctx.recycledSocials?.length) add('bad', `Socials reused from ${ctx.recycledSocials.length} other coin(s)`, 'Recycled socials');
 
+  // 7. How it was launched: quick-deploy tool / copy of an earlier coin (tracked, not scored yet)
+  if (ctx.deployTool) add('info', `Launched with ${ctx.deployTool} (quick deploy off a tweet)`);
+  if (ctx.copyOf) add('info', `Copy of $${ctx.copyOf.symbol} launched ${Math.max(1, Math.round((Date.now() - ctx.copyOf.at) / 60_000))} min earlier (${ctx.copyOf.how})`);
+
   const bad = flags.filter((f) => f.level === 'bad').length;
   const warn = flags.filter((f) => f.level === 'warn').length;
   const verdict = bad ? 'AVOID' : warn >= 2 ? 'CAUTION' : 'SAFE';

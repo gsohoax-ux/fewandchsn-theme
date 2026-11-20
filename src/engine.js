@@ -7,6 +7,7 @@ import { combine } from './score.js';
 import { computeConfidence } from './confidence.js';
 import { featurize } from './learn.js';
 import { matchCoin } from './xwatch.js';
+import { CopyIndex, detectDeployTool } from './copies.js';
 import { dexPaid } from './dexscreener.js';
 
 const MAX_PARALLEL_EVALS = 4;
@@ -23,6 +24,7 @@ export class Engine {
     this.counters = { launches: 0, evaluated: 0, alerts: 0, dropped: 0 };
     this.feedConnected = false;
     this.radar = new Map(); // tweet id -> { author, mints: Map(mint -> ts) }
+    this.copies = new CopyIndex();
     this.events = [];        // live log: what each part of the bot decided, and why
     this.kills = new Map();  // rejection reason -> number of coins
     this.pipeline = { scored: 0, filtered: 0, lowScore: 0, dead: 0 };
@@ -80,6 +82,10 @@ export class Engine {
     const metaP = msg._meta ? Promise.resolve(msg._meta) : fetchMetadata(coin.uri);
     metaP.then((meta) => {
       coin.meta = meta;
+      // Quick-deploy tools (J7 etc.) and copies of an earlier coin ("vamps")
+      coin.deployTool = detectDeployTool(meta, this.cfg.deployToolPatterns);
+      coin.copyOf = this.copies.originalOf(coin);
+      this.copies.add(coin);
       const sk = socialKey(meta?.twitter);
       const tg = socialKey(meta?.telegram);
       const ownSocial = sk && sk.kind !== 'tweet' ? sk.key : tg?.key ?? null;
@@ -128,6 +134,7 @@ export class Engine {
       mint: c.mint, symbol: c.symbol, name: c.name, ageSec: Math.round(c.ageSec(now)), mcSol: c.mcSol,
       progress: c.progress, buyers: c.organicBuyerCount(), score: c.result?.score ?? null,
       verdict: c.result?.safety.verdict ?? null, light: c.result?.light ?? '', x: Boolean(c.xMatch), trend: Boolean(c.trendMatch),
+      deployTool: c.deployTool ?? null, copy: Boolean(c.copyOf),
       alerted: Boolean(c.alert),
     });
     const live = [...this.coins.values()].filter((c) => !c.migrated);
@@ -373,6 +380,7 @@ export class Engine {
       cfg, recycledSocials,
       devLaunches24h: this.store.devLaunches(coin.creator, now - 86400_000),
       devHistory: this.store.devHistory(coin.creator, coin.mint),
+      deployTool: coin.deployTool, copyOf: coin.copyOf,
     });
 
     const momentum = analyzeMomentum(coin, now, cfg.smartWallets, new Set(this.#insiders(coin, chainData)));
@@ -489,7 +497,7 @@ export class Engine {
     this.counters.alerts++;
     this.log.info(`ALERT ${light} $${coin.symbol} ${score}/100 [${stage}] conf ${coin.result.confidence.label} ${coin.mint}`);
     this.logEvent('ALERT', coin, `score ${score} · ${stage === 'x' ? 'X narrative' : stage} · ${coin.result.confidence.label} confidence`, 'good');
-    this.paper?.open(coin, { stage, score }, this.coins, now);
+    this.paper?.open(coin, { stage, score, deployTool: coin.deployTool, vamp: Boolean(coin.copyOf) }, this.coins, now);
     await this.notifier.alert(coin, coin.result, stage);
   }
 
@@ -514,7 +522,8 @@ export class Engine {
       links: coin.links(this.cfg.padreUrlTemplate),
       score: r?.score ?? null, light: r?.light ?? '', stage: r?.stage ?? null, evaluatedAt: r?.at ?? null,
       safety: r?.safety ?? null, narrative: r?.narrative ?? null, momentum: r?.momentum ?? null,
-      confidence: r?.confidence ?? null, x: r?.x ?? null, trend: r?.trend ?? null, learned: r?.learned ?? null, dexPaid: r?.dexPaid ?? null,
+      confidence: r?.confidence ?? null, x: r?.x ?? null, trend: r?.trend ?? null,
+      deployTool: coin.deployTool ?? null, copyOf: coin.copyOf ?? null, learned: r?.learned ?? null, dexPaid: r?.dexPaid ?? null,
       events: r?.events ?? [],
       alert: coin.alert ? { ...coin.alert, peakMult: coin.alert.mcSol ? coin.peakMcSinceAlert / coin.alert.mcSol : 1 } : null,
     };
