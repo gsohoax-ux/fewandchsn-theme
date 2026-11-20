@@ -3,13 +3,14 @@
 const clamp = (x, a = 0, b = 100) => Math.max(a, Math.min(b, x));
 const sat = (x, half) => x <= 0 ? 0 : x / (x + half); // 0..1, = 0.5 at x = half
 
-export function analyzeMomentum(coin, now = Date.now(), smartWallets = new Set()) {
+export function analyzeMomentum(coin, now = Date.now(), smartWallets = new Set(), insiders = new Set()) {
   const w2 = now - 120_000;
   const recent = coin.trades.filter((t) => t.ts >= w2);
   const DUST_SOL = 0.02;
   const allBuys = recent.filter((t) => t.side === 'buy');
   // Tiny "dust" buys are usually bots inflating the buyer count - ignore them
-  const buys = allBuys.filter((t) => t.sol >= DUST_SOL);
+  // ...and insiders (launch-block and funding-linked wallets) buying their own coin isn't real demand
+  const buys = allBuys.filter((t) => t.sol >= DUST_SOL && !insiders.has(t.trader));
   const dustPct = allBuys.length ? ((allBuys.length - buys.length) / allBuys.length) * 100 : 0;
   const sells = recent.filter((t) => t.side === 'sell');
   const buySol = buys.reduce((s, t) => s + t.sol, 0);

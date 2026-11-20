@@ -4,6 +4,7 @@ export function combine(safety, narrative, momentum, learnedPct = null, blend = 
   let score = 0.35 * narrative.score + 0.35 * momentum.score + 0.30 * safety.score;
   // Once the bot has learned (and proven) what works, mix in its learned ranking
   if (learnedPct != null) score = (1 - blend) * score + blend * learnedPct;
+  if (safety.devClean) score += 5; // devs whose past coins graduated without rugging do much better
   if (safety.verdict === 'AVOID') score = Math.min(score, 30);
   else if (safety.verdict === 'CAUTION') score -= 5;
   score = Math.round(Math.max(0, Math.min(100, score)));

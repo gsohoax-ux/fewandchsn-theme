@@ -75,15 +75,27 @@ export const config = {
   paperLowUsd: num('PAPER_LOW_USD', 10),             // phone alert when today's balance drops under this
   paperStopAtLow: env('PAPER_STOP_AT_LOW', '0') === '1', // also stop paper buying for the day at that point
   paperTz: env('PAPER_TZ', 'America/Chicago'),       // when a new day starts
-  paperSizePct: num('PAPER_SIZE_PCT', 20),           // % of equity per trade ($30 budget -> about $6 a trade)
-  paperMaxOpen: num('PAPER_MAX_OPEN', 4),
-  paperStopPct: num('PAPER_STOP_PCT', 25),           // sell if down this %
-  paperTrailStartPct: num('PAPER_TRAIL_START_PCT', 30), // trailing stop starts after this gain
-  paperTrailPct: num('PAPER_TRAIL_PCT', 20),         // ...and sells after this drop from the best value
+  paperSizePct: num('PAPER_SIZE_PCT', 45),           // % of equity per trade: fewer, bigger trades so fixed fees matter less
+  paperMaxOpen: num('PAPER_MAX_OPEN', 2),
+  paperStopPct: num('PAPER_STOP_PCT', 35),           // sell if the PRICE falls this % below the entry
+  paperTrailStartPct: num('PAPER_TRAIL_START_PCT', 30), // trailing stop starts after the price rises this %
+  paperTrailPct: num('PAPER_TRAIL_PCT', 20),         // ...and sells after the price drops this % from its best
+  paperTrailAfterGradPct: num('PAPER_TRAIL_AFTER_GRAD_PCT', 12), // tighter trail once the coin has graduated
+  paperGradTakePct: num('PAPER_GRAD_TAKE_PCT', 92),  // sell half when the curve reaches this % (0 = off)
+  paperGradExitMin: num('PAPER_GRAD_EXIT_MIN', 5),   // sell the rest this many minutes after graduation
+  paperStallMin: num('PAPER_STALL_MIN', 25),         // exit if no follow-through within this many minutes...
+  paperStallGainPct: num('PAPER_STALL_GAIN_PCT', 30), // ...meaning the price never got this % above the entry
   paperMaxHoldMin: num('PAPER_MAX_HOLD_MIN', 90),
   paperFeePct: num('PAPER_FEE_PCT', 1.25),           // Pump.fun trading fee per side
   paperTxFeeSol: num('PAPER_TX_FEE_SOL', 0.0015),    // network + priority fee per transaction (match your Padre setting)
-  paperSlippagePct: num('PAPER_SLIPPAGE_PCT', 3),    // extra slippage from being slower than snipers
+  paperSlippagePct: num('PAPER_SLIPPAGE_PCT', 2),    // extra slippage from being slower than snipers
+  paperTerminalFeePct: num('PAPER_TERMINAL_FEE_PCT', 1), // trading app fee per side (Padre/Axiom/GMGN charge about 1%)
+  paperMevPct: num('PAPER_MEV_PCT', 2),               // sandwich-bot losses on buys
+  paperMaxFixedCostPct: num('PAPER_MAX_FIXED_COST_PCT', 5), // skip trades where network fees exceed this % of the trade
+
+  // Market regime: when few coins are graduating, be pickier
+  coldGradPct: num('COLD_GRAD_PCT', 0.4),            // 24h graduation rate below this % = cold market
+  coldScoreBump: num('COLD_SCORE_BUMP', 5),          // extra score needed to alert in a cold market
 
   // Dashboard
   port: num('PORT', 8080),

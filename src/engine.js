@@ -25,6 +25,7 @@ export class Engine {
     this.events = [];        // live log: what each part of the bot decided, and why
     this.kills = new Map();  // rejection reason -> number of coins
     this.pipeline = { scored: 0, filtered: 0, lowScore: 0, dead: 0 };
+    this.regimeLog = { launches: [], grads: [] }; // minute buckets for the 24h graduation rate
     this.xwatch?.on('posts', () => this.#rematchAll());
   }
 
@@ -69,6 +70,7 @@ export class Engine {
     const coin = new Coin(msg);
     this.coins.set(coin.mint, coin);
     this.counters.launches++;
+    this.#bump(this.regimeLog.launches);
     this.feed.watch(coin.mint);
     this.store.addLaunch(coin);
     this.trends.recordLaunch(coin);
@@ -87,6 +89,26 @@ export class Engine {
       coin.xMatch = this.#xMatch(coin);
     }).catch(() => { coin.meta = coin.meta ?? {}; });
   }
+
+  #bump(arr, now = Date.now()) {
+    const m = Math.floor(now / 60_000);
+    if (arr.length && arr.at(-1)[0] === m) arr.at(-1)[1]++; else arr.push([m, 1]);
+    const cutoff = m - 24 * 60;
+    while (arr.length && arr[0][0] < cutoff) arr.shift();
+  }
+
+  /** Market mood: what share of new coins graduated in the last 24h (cold markets need pickier alerts). */
+  regime(now = Date.now()) {
+    const cutoff = Math.floor(now / 60_000) - 24 * 60;
+    const sum = (a) => a.filter(([m]) => m >= cutoff).reduce((s, [, n]) => s + n, 0);
+    const launches = sum(this.regimeLog.launches), grads = sum(this.regimeLog.grads);
+    if (launches < 1500) return { state: 'warming up', launches, grads, rate: null };
+    const rate = (grads / launches) * 100;
+    const state = rate < this.cfg.coldGradPct ? 'cold' : rate > this.cfg.coldGradPct * 3 ? 'hot' : 'normal';
+    return { state, launches, grads, rate };
+  }
+
+  alertBar() { return this.cfg.alertMinScore + (this.regime().state === 'cold' ? this.cfg.coldScoreBump : 0); }
 
   logEvent(agent, coin, text, level = '') {
     this.events.push({ at: Date.now(), agent, symbol: coin?.symbol ?? '', mint: coin?.mint ?? '', text, level });
@@ -165,10 +187,12 @@ export class Engine {
   }
 
   onMigrate(msg) {
+    this.#bump(this.regimeLog.grads);
     const coin = this.coins.get(msg.mint);
     if (!coin) return;
     coin.migrated = true;
     coin.progress = 100;
+    this.paper?.onMigrate(coin, this.coins);
     this.#flushSamples(coin, Date.now());
     this.trends.recordRunner(coin);
     if (coin.alert) {
@@ -232,10 +256,10 @@ export class Engine {
       if (coin.alert) this.store.updatePeak(coin.mint, coin.peakMcSinceAlert, coin.migrated);
 
       if (coin.evaluating || this.paused) continue;
-      if (coin.xMatch && !coin.xDone && age >= cfg.freshMinAgeSec && coin.buyers.size >= cfg.xMinBuyers && !coin.migrated) {
+      if (coin.xMatch && !coin.xDone && age >= cfg.freshMinAgeSec && coin.organicBuyerCount() >= cfg.xMinBuyers && !coin.migrated) {
         coin.xDone = true; this.#enqueue(coin, 'x');
       } else if (!coin.freshDone && age >= cfg.freshMinAgeSec && age <= cfg.freshMaxAgeSec &&
-          (coin.buyers.size >= cfg.freshMinBuyers || coin.progress >= 10)) {
+          (coin.organicBuyerCount() >= cfg.freshMinBuyers || coin.progress >= 10)) {
         coin.freshDone = true; this.#enqueue(coin, 'fresh');
       } else if (!coin.midDone && coin.progress >= cfg.midProgressPct && !coin.migrated) {
         coin.midDone = true; coin.freshDone = true; this.#enqueue(coin, 'mid');
@@ -278,7 +302,7 @@ export class Engine {
       devHistory: this.store.devHistory(coin.creator, coin.mint),
     });
 
-    const momentum = analyzeMomentum(coin, now, cfg.smartWallets);
+    const momentum = analyzeMomentum(coin, now, cfg.smartWallets, new Set(this.#insiders(coin, chainData)));
 
     // Narrative (AI only for coins worth it - saves money)
     const nctx = {
@@ -342,10 +366,10 @@ export class Engine {
         const bad = safety.flags.filter((f) => f.level === 'bad');
         for (const f of bad) this.#kill(f.cat || 'Other red flag');
         this.logEvent('FILTER', coin, `killed · ${bad[0]?.text ?? 'red flags'}`, 'bad');
-      } else if (score < cfg.alertMinScore) {
+      } else if (score < this.alertBar()) {
         this.pipeline.lowScore++;
-        this.#kill(`Score below ${cfg.alertMinScore}`);
-        this.logEvent('ANALYST', coin, `passed on · score ${score} < ${cfg.alertMinScore}`, 'muted');
+        this.#kill(`Score below ${this.alertBar()}`);
+        this.logEvent('ANALYST', coin, `passed on · score ${score} < ${this.alertBar()}`, 'muted');
       }
     }
 
@@ -357,7 +381,7 @@ export class Engine {
       return coin.result;
     }
 
-    const shouldAlert = score >= cfg.alertMinScore && safety.verdict !== 'AVOID' &&
+    const shouldAlert = score >= this.alertBar() && safety.verdict !== 'AVOID' &&
       (stage === 'fresh' || stage === 'mid' || (stage === 'recheck' && !coin.alert));
     if (shouldAlert && !this.paused) {
       const alertStage = stage === 'recheck' ? (coin.progress >= cfg.midProgressPct ? 'mid' : 'fresh') : stage;
@@ -437,7 +461,7 @@ export class Engine {
       notify: this.notifier.channels,
       x: this.xwatch?.enabled ? { on: true, posts: this.xwatch.posts.size, error: this.xwatch.lastError }
         : { on: false, radar: Boolean(this.xwatch), posts: this.xwatch?.posts.size ?? 0 },
-      hotThemes: this.trends.hotThemes(), alertMinScore: this.cfg.alertMinScore,
+      hotThemes: this.trends.hotThemes(), alertMinScore: this.alertBar(), regime: this.regime(),
       learning: this.learner?.status() ?? null,
       pipeline: { launches: this.counters.launches, ...this.pipeline, alerts: this.counters.alerts,
         paperTrades: this.paper ? this.store.paperTradesSince(0).length + this.paper.positions.size : 0 },

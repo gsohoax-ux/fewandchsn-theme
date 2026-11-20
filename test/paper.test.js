@@ -63,7 +63,7 @@ test('trailing stop locks in profit after a run-up', () => {
   setPrice(coin, 50); t.onPrice(coin, coins);   // bigger drop from the top: sold
   assert.equal(t.positions.size, 0);
   const tr = store.paperTrades()[0];
-  assert.match(tr.why, /trailing stop \+/);
+  assert.match(tr.why, /trailing stop \(\+/);
   assert.ok(tr.proceeds_sol > tr.cost_sol, 'sold at a profit');
   assert.ok(t.cash > 2);
 });

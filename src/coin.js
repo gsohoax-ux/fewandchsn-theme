@@ -123,6 +123,13 @@ export class Coin {
     return pctOfSupply(top.reduce((a, b) => a + b, 0));
   }
 
+  /** Buyers that are not the dev and did not buy in the launch moment (where bundles and snipers sit). */
+  organicBuyerCount(launchWindowMs = 1500) {
+    let n = 0;
+    for (const [w, ts] of this.firstBuyAt) if (w !== this.creator && ts - this.createdAt > launchWindowMs) n++;
+    return n;
+  }
+
   /** The first N distinct buyers, in order (dev excluded). */
   earlyBuyers(n = 25) {
     return [...this.firstBuyAt.entries()]

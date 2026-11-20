@@ -54,16 +54,28 @@ can see in dollars whether following the alerts would make money. **Nothing touc
 | `PAPER_STOP_AT_LOW` | 0 | `1` also stops paper buying for the rest of the day at that point |
 | `PAPER_TZ` | America/Chicago | When a new day starts |
 | `PAPER_START_SOL` | 2 | Starting balance, only used when `PAPER_DAILY_USD` is 0 |
-| `PAPER_SIZE_PCT` | 20 | % of the balance per trade (about $6 of a $30 budget) |
-| `PAPER_MAX_OPEN` | 4 | Max positions at once |
-| `PAPER_STOP_PCT` | 25 | Sell if down this much |
-| `PAPER_TRAIL_START_PCT` / `PAPER_TRAIL_PCT` | 30 / 20 | After +30%, sell when it drops 20% from its best |
+| `PAPER_SIZE_PCT` | 45 | % of the balance per trade (about $13 of $30). Fewer, bigger trades so fixed network fees matter less. |
+| `PAPER_MAX_OPEN` | 2 | Max positions at once |
+| `PAPER_STOP_PCT` | 35 | Sell if the **price** falls this % below the entry. It uses price, not value after costs, because costs alone put a new position about 10–15% down. |
+| `PAPER_TRAIL_START_PCT` / `PAPER_TRAIL_PCT` | 30 / 20 | After the price rises 30%, sell when it drops 20% from its best |
+| `PAPER_GRAD_TAKE_PCT` | 92 | Sell half when the curve reaches this %. Graduation is often the top. `0` turns it off. |
+| `PAPER_GRAD_EXIT_MIN` / `PAPER_TRAIL_AFTER_GRAD_PCT` | 5 / 12 | Sell the rest this many minutes after graduation, with a tighter trail in the meantime |
+| `PAPER_STALL_MIN` / `PAPER_STALL_GAIN_PCT` | 25 / 30 | Exit if the price never got +30% within 25 minutes (no follow-through) |
+| `PAPER_TERMINAL_FEE_PCT` / `PAPER_MEV_PCT` | 1 / 2 | Trading-app fee per side, and sandwich-bot losses on buys |
+| `PAPER_MAX_FIXED_COST_PCT` | 5 | Skip trades where network fees would be more than this % of the trade |
 | `PAPER_MAX_HOLD_MIN` | 90 | Sell after this many minutes regardless |
-| `PAPER_FEE_PCT`, `PAPER_TX_FEE_SOL`, `PAPER_SLIPPAGE_PCT` | 1.25, 0.0015, 3 | Costs. Set the tx fee to match your Padre priority fee. |
+| `PAPER_FEE_PCT`, `PAPER_TX_FEE_SOL`, `PAPER_SLIPPAGE_PCT` | 1.25, 0.0015, 2 | Costs. Set the tx fee to match your Padre priority fee. |
 | `PAPER` | 1 | 0 turns paper trading off |
 
 A −6% stop like some bots advertise would trigger almost immediately, because fees and slippage alone
-cost about that much. That's why the default stop is wider.
+cost about that much. That's why the default stop is wider, and why it is measured on price.
+
+The paper card also shows **results by when it bought** (stage and curve %). After a few hundred
+trades, that tells you which entry timing actually makes money. Each trade logs its best and worst
+move, its cost hurdle, and the market mood at entry.
+
+**Market mood:** the bot tracks what share of new coins graduated in the last 24 hours. Below
+`COLD_GRAD_PCT` (0.4%) the market is "cold", and the alert bar goes up by `COLD_SCORE_BUMP` (5).
 
 **Real auto-trading is not built yet, on purpose.** It only makes sense after paper trading has been
 profitable over a good number of trades. It also means giving the bot a wallet key, so it needs

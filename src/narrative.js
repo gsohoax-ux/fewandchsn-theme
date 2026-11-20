@@ -87,8 +87,10 @@ export function ruleNarrative(coin, ctx) {
   else if (tw?.kind === 'community') { s += 10; reasons.push('Has an X community'); }
   else if (tw) { s += 10; reasons.push('Has an X account'); }
   else reasons.push('No X link');
-  if (m.telegram) s += 5;
-  if (m.website) s += 5;
+  // Coins listing socials graduate far more often (Telegram ~9x, all three ~17x in a 2026 study)
+  if (m.telegram) s += 10;
+  if (m.website) s += 10;
+  if (tw && m.telegram && m.website) { s += 10; reasons.push('Has X, Telegram and website'); }
   if ((m.description ?? '').length > 30) s += 5;
 
   const hot = new Set(ctx.hotThemes.map((h) => h.word));

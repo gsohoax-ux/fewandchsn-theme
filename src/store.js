@@ -34,6 +34,11 @@ export class Store {
     for (const [c, t] of [['ath_mc', 'REAL'], ['final_mc', 'REAL'], ['rugged', 'INTEGER'], ['graduated', 'INTEGER']]) {
       if (!cols.has(c)) this.db.exec(`ALTER TABLE launches ADD COLUMN ${c} ${t}`);
     }
+    // ...and the per-trade evaluation columns for paper trades
+    const pcols = new Set(this.db.prepare('PRAGMA table_info(paper_trades)').all().map((c) => c.name));
+    for (const c of ['entry_progress', 'mfe', 'mae', 'hurdle', 'regime']) {
+      if (!pcols.has(c)) this.db.exec(`ALTER TABLE paper_trades ADD COLUMN ${c} REAL`);
+    }
     const q = (sql) => this.db.prepare(sql);
     this.s = {
       addLaunch: q(`INSERT OR IGNORE INTO launches (mint, creator, symbol, name, social_key, tweet_key, created_at) VALUES (?,?,?,?,?,?,?)`),
@@ -56,7 +61,8 @@ export class Store {
       setOutcome: q(`UPDATE launches SET ath_mc = ?, final_mc = ?, rugged = ?, graduated = ? WHERE mint = ?`),
       devHistory: q(`SELECT COUNT(*) finished, SUM(rugged) rugged, SUM(graduated) migrated FROM launches
                      WHERE creator = ? AND mint != ? AND rugged IS NOT NULL`),
-      addPaper: q(`INSERT INTO paper_trades VALUES (?,?,?,?,?,?,?,?,?,?,?)`),
+      addPaper: q(`INSERT INTO paper_trades (mint, symbol, opened_at, closed_at, cost_sol, proceeds_sol, why, stage, score,
+                   entry_mc, exit_mc, entry_progress, mfe, mae, hurdle, regime) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`),
       paperTrades: q(`SELECT * FROM paper_trades ORDER BY closed_at DESC LIMIT ?`),
       paperSince: q(`SELECT * FROM paper_trades WHERE closed_at >= ?`),
       getKv: q(`SELECT v FROM kv WHERE k = ?`),
@@ -111,7 +117,8 @@ export class Store {
 
   // ---- paper trading ----
   addPaperTrade(t) {
-    this.s.addPaper.run(t.mint, t.symbol, t.openedAt, t.closedAt, t.costSol, t.proceedsSol, t.why, t.stage, t.score, t.entryMc, t.exitMc);
+    this.s.addPaper.run(t.mint, t.symbol, t.openedAt, t.closedAt, t.costSol, t.proceedsSol, t.why, t.stage, t.score, t.entryMc, t.exitMc,
+      t.entryProgress ?? null, t.mfe ?? null, t.mae ?? null, t.hurdle ?? null, t.regime ?? null);
   }
   paperTrades(limit = 50) { return this.s.paperTrades.all(limit); }
   paperTradesSince(ms) { return this.s.paperSince.all(ms); }

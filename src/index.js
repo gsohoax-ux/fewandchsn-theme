@@ -32,7 +32,7 @@ const notifier = new Notifier({ ntfy, telegram, cfg, getSolUsd: () => engine.sol
 if (cfg.demo) cfg.xPollSec = 15;
 const xwatch = new XWatcher({ source: xSource, ai, cfg, notifier, log });
 const learner = new Learner({ store, cfg, log });
-const paper = new PaperTrader({ cfg, store, log, getSolUsd: () => engine.solUsd,
+const paper = new PaperTrader({ cfg, store, log, getSolUsd: () => engine.solUsd, getRegime: () => engine.regime(),
   onEvent: (agent, coin, text, level) => engine.logEvent(agent, coin, text, level),
   onNotify: (text) => notifier.info(text) });
 const engine = new Engine({ cfg, feed, chain, store, notifier, ai, xwatch, learner, paper, log });

@@ -15,8 +15,8 @@ export function dayKey(ms, tz = 'UTC') {
 }
 
 export class PaperTrader {
-  constructor({ cfg, store, log = console, onEvent = () => {}, onNotify = async () => {}, getSolUsd = () => 0 }) {
-    Object.assign(this, { cfg, store, log, onEvent, onNotify, getSolUsd });
+  constructor({ cfg, store, log = console, onEvent = () => {}, onNotify = async () => {}, getSolUsd = () => 0, getRegime = () => null }) {
+    Object.assign(this, { cfg, store, log, onEvent, onNotify, getSolUsd, getRegime });
     this.positions = new Map(); // mint -> position
     // Daily budget mode: a fresh $ budget every day (e.g. $30), with a low-balance warning
     this.daily = cfg.paperDailyUsd > 0;
@@ -64,22 +64,28 @@ export class PaperTrader {
 
   get enabled() { return this.cfg.paper; }
 
-  /** Fees and slippage applied to a quote. */
+  /** Fee per side: Pump.fun fee + trading-app (terminal) fee. */
+  get #feePct() { return this.cfg.paperFeePct + (this.cfg.paperTerminalFeePct ?? 0); }
+
+  /** Fees, slippage and sandwich-bot losses applied to a buy. */
   #buyFill(coin, sol) {
     const c = this.cfg;
-    const solIn = Math.max(0, sol - c.paperTxFeeSol) * (1 - c.paperFeePct / 100);
+    const solIn = Math.max(0, sol - c.paperTxFeeSol) * (1 - this.#feePct / 100);
     const tokens = coin.migrated ? solIn / (coin.mcSol / 1e9) * 0.98 : quoteBuy(coin.vSol, coin.vTokens, solIn);
-    return tokens * (1 - c.paperSlippagePct / 100);
+    return tokens * (1 - c.paperSlippagePct / 100) * (1 - (c.paperMevPct ?? 0) / 100);
+  }
+
+  /** SOL received for selling `tokens` now, after fees and slippage. */
+  #sellValue(tokens, coin, fallbackMc) {
+    const c = this.cfg;
+    const raw = coin && !coin.migrated
+      ? quoteSell(coin.vSol, coin.vTokens, tokens)
+      : tokens * ((coin?.mcSol ?? fallbackMc) / 1e9) * 0.98;
+    return Math.max(0, raw * (1 - this.#feePct / 100) * (1 - c.paperSlippagePct / 100) - c.paperTxFeeSol);
   }
 
   /** What selling the whole position would return right now, after fees and slippage. */
-  valueOf(pos, coin) {
-    const c = this.cfg;
-    const raw = coin && !coin.migrated
-      ? quoteSell(coin.vSol, coin.vTokens, pos.tokens)
-      : pos.tokens * ((coin?.mcSol ?? pos.lastMc ?? pos.entryMc) / 1e9) * 0.98;
-    return Math.max(0, raw * (1 - c.paperFeePct / 100) * (1 - c.paperSlippagePct / 100) - c.paperTxFeeSol);
-  }
+  valueOf(pos, coin) { return this.#sellValue(pos.tokens, coin, pos.lastMc ?? pos.entryMc); }
 
   equity(coins) {
     let eq = this.cash;
@@ -95,12 +101,20 @@ export class PaperTrader {
     if (this.positions.size >= this.cfg.paperMaxOpen) return this.#skip(coin, `max ${this.cfg.paperMaxOpen} open positions`);
     const size = Math.min(this.cash, this.equity(coins) * (this.cfg.paperSizePct / 100));
     if (size < this.cfg.paperTxFeeSol * 5) return this.#skip(coin, 'not enough paper cash');
+    // Network fees are fixed per transaction: on tiny trades they eat the edge, so skip those
+    const fixedPct = ((2 * this.cfg.paperTxFeeSol) / size) * 100;
+    if (this.cfg.paperMaxFixedCostPct && fixedPct > this.cfg.paperMaxFixedCostPct) {
+      return this.#skip(coin, `trade too small: network fees would be ${fixedPct.toFixed(0)}% of it`);
+    }
     const tokens = this.#buyFill(coin, size);
     if (!(tokens > 0)) return null;
     this.cash -= size;
     const pos = { mint: coin.mint, symbol: coin.symbol, name: coin.name, openedAt: now, costSol: size, tokens,
-      entryMc: coin.mcSol, stage, score, peakValue: 0, lastValue: 0, lastMc: coin.mcSol, trailing: false };
+      entryMc: coin.mcSol, peakMc: coin.mcSol, lowMc: coin.mcSol, entryProgress: coin.progress, stage, score,
+      regime: this.getRegime?.()?.rate ?? null, peakValue: 0, lastValue: 0, lastMc: coin.mcSol, trailing: false,
+      halfTaken: false, migratedAt: null };
     pos.peakValue = pos.lastValue = this.valueOf(pos, coin);
+    pos.hurdle = 1 - pos.lastValue / size; // what the price must rise just to break even
     this.positions.set(coin.mint, pos);
     this.onEvent('EXECUTOR', coin, `paper-bought ${size.toFixed(3)} SOL at MC ${coin.mcSol.toFixed(0)} SOL (${stage})`);
     this.#save(coins);
@@ -114,19 +128,51 @@ export class PaperTrader {
     const pos = this.positions.get(coin.mint);
     if (!pos) return;
     const c = this.cfg;
+    // Stops use the coin's PRICE (market cap), not the position value after costs: fees and slippage
+    // already put a fresh position ~10-15% down, so a value-based stop would fire on normal noise.
+    const mc = coin.mcSol;
     const value = this.valueOf(pos, coin);
-    pos.lastValue = value; pos.lastMc = coin.mcSol;
+    pos.lastValue = value; pos.lastMc = mc;
     pos.peakValue = Math.max(pos.peakValue, value);
-    const pnl = value / pos.costSol - 1;
-    const peakPnl = pos.peakValue / pos.costSol - 1;
-    if (!pos.trailing && peakPnl >= c.paperTrailStartPct / 100) {
+    pos.peakMc = Math.max(pos.peakMc ?? mc, mc);
+    pos.lowMc = Math.min(pos.lowMc ?? mc, mc);
+    const move = mc / pos.entryMc - 1;
+    const peakMove = pos.peakMc / pos.entryMc - 1;
+    const net = () => { const p = this.valueOf(pos, coin) / pos.costSol - 1; return `${p >= 0 ? '+' : ''}${(p * 100).toFixed(0)}% net`; };
+
+    if (!pos.trailing && peakMove >= c.paperTrailStartPct / 100) {
       pos.trailing = true;
-      this.onEvent('RISK', coin, `trailing stop active after +${(peakPnl * 100).toFixed(0)}%`);
+      this.onEvent('RISK', coin, `trailing stop active after price +${(peakMove * 100).toFixed(0)}%`);
     }
-    if (pnl <= -c.paperStopPct / 100) return this.close(pos, coin, coins, `stop loss ${(pnl * 100).toFixed(0)}%`, now);
-    if (pos.trailing && value <= pos.peakValue * (1 - c.paperTrailPct / 100)) {
-      return this.close(pos, coin, coins, `trailing stop ${pnl >= 0 ? '+' : ''}${(pnl * 100).toFixed(0)}%`, now);
+    if (move <= -c.paperStopPct / 100) return this.close(pos, coin, coins, `stop loss: price ${(move * 100).toFixed(0)}% (${net()})`, now);
+    const trail = (coin.migrated ? c.paperTrailAfterGradPct : null) ?? c.paperTrailPct;
+    if (pos.trailing && mc <= pos.peakMc * (1 - trail / 100)) {
+      return this.close(pos, coin, coins, `trailing stop (${net()})`, now);
     }
+    // Graduation is often the top: take half off as the curve nears completion
+    if (c.paperGradTakePct && !pos.halfTaken && coin.progress >= c.paperGradTakePct) {
+      this.#sellPart(pos, coin, coins, 0.5, `took half at ${coin.progress.toFixed(0)}% of the curve`, now);
+    }
+  }
+
+  /** The coin graduated: take half now (if not done) and sell the rest a few minutes later. */
+  onMigrate(coin, coins, now = Date.now()) {
+    const pos = this.positions.get(coin.mint);
+    if (!pos || pos.migratedAt) return;
+    pos.migratedAt = now;
+    if (this.cfg.paperGradTakePct && !pos.halfTaken) this.#sellPart(pos, coin, coins, 0.5, 'took half at graduation', now);
+  }
+
+  #sellPart(pos, coin, coins, frac, why, now) {
+    const tokens = pos.tokens * frac;
+    const proceeds = this.#sellValue(tokens, coin, pos.lastMc ?? pos.entryMc);
+    const cost = pos.costSol * frac;
+    pos.tokens -= tokens; pos.costSol -= cost; pos.halfTaken = true;
+    this.cash += proceeds;
+    this.#record({ ...pos, costSol: cost }, proceeds, why, now, coin?.mcSol ?? pos.lastMc);
+    const p = proceeds / cost - 1;
+    this.onEvent('RISK', coin ?? pos, `${why} (${p >= 0 ? '+' : ''}${(p * 100).toFixed(1)}%)`, p >= 0 ? 'good' : 'bad');
+    this.#save(coins);
   }
 
   /** Time stop, coins the bot stopped tracking, and the equity chart. */
@@ -151,6 +197,15 @@ export class PaperTrader {
     for (const pos of [...this.positions.values()]) {
       const coin = coins.get(pos.mint);
       if (!coin) { this.close(pos, null, coins, 'coin stopped trading', now); continue; }
+      const c = this.cfg;
+      if (pos.migratedAt && c.paperGradExitMin != null && now - pos.migratedAt >= c.paperGradExitMin * 60_000) {
+        this.close(pos, coin, coins, `sold ${c.paperGradExitMin} min after graduation`, now); continue;
+      }
+      // No follow-through: most coins die fast, so don't wait the full hold time on a dud
+      if (c.paperStallMin && !pos.trailing && now - pos.openedAt >= c.paperStallMin * 60_000 &&
+          (pos.peakMc ?? pos.entryMc) / pos.entryMc - 1 < (c.paperStallGainPct ?? 0) / 100) {
+        this.close(pos, coin, coins, `no follow-through in ${c.paperStallMin} min`, now); continue;
+      }
       if (now - pos.openedAt > this.cfg.paperMaxHoldMin * 60_000) {
         const pnl = this.valueOf(pos, coin) / pos.costSol - 1;
         this.close(pos, coin, coins, `time stop ${pnl >= 0 ? '+' : ''}${(pnl * 100).toFixed(0)}%`, now);
@@ -176,7 +231,9 @@ export class PaperTrader {
 
   #record(pos, proceeds, why, now, exitMc) {
     this.store.addPaperTrade({ mint: pos.mint, symbol: pos.symbol, openedAt: pos.openedAt, closedAt: now,
-      costSol: pos.costSol, proceedsSol: proceeds, why, stage: pos.stage, score: pos.score, entryMc: pos.entryMc, exitMc });
+      costSol: pos.costSol, proceedsSol: proceeds, why, stage: pos.stage, score: pos.score, entryMc: pos.entryMc, exitMc,
+      entryProgress: pos.entryProgress ?? null, mfe: pos.peakMc ? pos.peakMc / pos.entryMc - 1 : null,
+      mae: pos.lowMc ? pos.lowMc / pos.entryMc - 1 : null, hurdle: pos.hurdle ?? null, regime: pos.regime ?? null });
     if (why === 'closed by restart') this.cash += proceeds;
   }
 
@@ -184,6 +241,21 @@ export class PaperTrader {
     const positions = [...this.positions.values()].map((p) => ({ ...p, lastValue: this.valueOf(p, coins?.get(p.mint)) }));
     this.store.setKv('paper', { account: this.account, startSol: this.startSol, cash: this.cash, equityHist: this.equityHist, positions,
       day: this.day, dayOpenedAt: this.dayOpenedAt, lowAlerted: this.lowAlerted, days: this.days });
+  }
+
+  /** All-time results grouped by when we bought (stage and curve %), so the data shows what works. */
+  #byStage() {
+    const groups = new Map();
+    for (const t of this.store.paperTradesSince(0)) {
+      if (t.why === 'closed by restart') continue;
+      const bucket = t.entry_progress == null ? '' : t.entry_progress < 20 ? ' · curve <20%' : t.entry_progress < 50 ? ' · curve 20-50%' : ' · curve 50%+';
+      const key = `${t.stage ?? '?'}${bucket}`;
+      const g = groups.get(key) ?? { key, n: 0, wins: 0, cost: 0, proceeds: 0 };
+      g.n++; g.cost += t.cost_sol; g.proceeds += t.proceeds_sol; if (t.proceeds_sol > t.cost_sol) g.wins++;
+      groups.set(key, g);
+    }
+    return [...groups.values()].sort((a, b) => b.n - a.n)
+      .map((g) => ({ key: g.key, trades: g.n, winRate: Math.round((g.wins / g.n) * 100), netPct: (g.proceeds / g.cost - 1) * 100 }));
   }
 
   view(coins, solUsd = 0) {
@@ -198,8 +270,11 @@ export class PaperTrader {
       pnlSol: eq - this.startSol, pnlPct: (eq / this.startSol - 1) * 100,
       trades: closed.length, winRate: closed.length ? Math.round((wins.length / closed.length) * 100) : 0,
       best: pnls.length ? Math.max(...pnls) * 100 : 0, worst: pnls.length ? Math.min(...pnls) * 100 : 0,
-      rules: { sizePct: this.cfg.paperSizePct, stopPct: this.cfg.paperStopPct, trailStartPct: this.cfg.paperTrailStartPct,
-        trailPct: this.cfg.paperTrailPct, maxHoldMin: this.cfg.paperMaxHoldMin },
+      rules: { sizePct: this.cfg.paperSizePct, maxOpen: this.cfg.paperMaxOpen, stopPct: this.cfg.paperStopPct,
+        trailStartPct: this.cfg.paperTrailStartPct, trailPct: this.cfg.paperTrailPct, maxHoldMin: this.cfg.paperMaxHoldMin,
+        gradTakePct: this.cfg.paperGradTakePct, gradExitMin: this.cfg.paperGradExitMin, stallMin: this.cfg.paperStallMin,
+        stallGainPct: this.cfg.paperStallGainPct, feePct: this.#feePct },
+      byStage: this.#byStage(),
       open: [...this.positions.values()].map((p) => {
         const v = this.valueOf(p, coins.get(p.mint));
         return { mint: p.mint, symbol: p.symbol, costSol: p.costSol, valueSol: v, pnlPct: (v / p.costSol - 1) * 100,

@@ -174,6 +174,7 @@ function render() {
     pill(`Alerts: ${s.notify.length ? s.notify.join(' + ') : 'off'}`, s.notify.length > 0) +
     pill(s.x.on ? `X ${s.x.error ? 'error' : 'on'}` : s.x.radar ? 'X radar (free)' : 'X off', s.x.on ? !s.x.error : s.x.radar,
       s.x.error || (s.x.on ? `${s.x.posts} posts tracked` : 'Free tweet radar: finds X posts many new coins launch on. Add X_BEARER_TOKEN for the full X watcher.')) +
+    (s.regime ? `<span class="pill ${s.regime.state === 'cold' ? 'off' : s.regime.state === 'hot' ? 'on' : ''}" title="${s.regime.launches} launches and ${s.regime.grads} graduations in 24h. In a cold market the alert bar goes up to ${s.alertMinScore}.">Market: ${s.regime.state}${s.regime.rate != null ? ` · ${s.regime.rate.toFixed(2)}% graduate` : ''}</span>` : '') +
     (s.paused ? '<span class="pill off">Alerts paused</span>' : '');
   const st = state.stats;
   $('stats').innerHTML = [
@@ -222,7 +223,12 @@ function render() {
       ${P.recent.length ? `<ul class="mini">${P.recent.slice(0, 5).map((t) => `<li><span>$${esc(t.symbol)} <span class="muted">${esc(t.why)}</span></span><span class="${t.pnlPct >= 0 ? 'up' : 'down'}">${t.pnlPct >= 0 ? '+' : ''}${t.pnlPct.toFixed(1)}%</span></li>`).join('')}</ul>` : ''}
       ${P.daily?.days.length ? `<ul class="mini">${P.daily.days.slice(0, 7).map((d) => { const pc = (d.endUsd / d.startUsd - 1) * 100;
         return `<li><span>${esc(d.day)} <span class="muted">${d.trades} trade${d.trades === 1 ? '' : 's'}</span></span><span class="${pc >= 0 ? 'up' : 'down'}">$${d.startUsd.toFixed(0)} → $${d.endUsd.toFixed(2)} (${sgn(pc, 1)}%)</span></li>`; }).join('')}</ul>` : ''}
-      <div class="rules">Rules: ${P.rules.sizePct}% per trade · stop −${P.rules.stopPct}% · trailing ${P.rules.trailPct}% after +${P.rules.trailStartPct}% · max ${P.rules.maxHoldMin} min · fees, slippage and price impact included</div>`;
+      ${P.byStage?.length ? `<div class="muted" style="font-size:12px;margin-top:10px">Results by when it bought (all time)</div>
+        <ul class="mini">${P.byStage.slice(0, 6).map((g) => `<li><span>${esc(g.key)} <span class="muted">${g.trades} trade${g.trades === 1 ? '' : 's'} · win ${g.winRate}%</span></span><span class="${g.netPct >= 0 ? 'up' : 'down'}">${sgn(g.netPct, 1)}%</span></li>`).join('')}</ul>` : ''}
+      <div class="rules">Rules: ${P.rules.sizePct}% per trade, max ${P.rules.maxOpen} open · stop when price −${P.rules.stopPct}% · trailing ${P.rules.trailPct}% after price +${P.rules.trailStartPct}%
+        ${P.rules.gradTakePct ? ` · sell half at ${P.rules.gradTakePct}% of the curve, rest ${P.rules.gradExitMin} min after graduation` : ''}
+        ${P.rules.stallMin ? ` · exit if not +${P.rules.stallGainPct}% within ${P.rules.stallMin} min` : ''} · max ${P.rules.maxHoldMin} min ·
+        costs: ${P.rules.feePct.toFixed(2)}% fees per side + slippage, sandwich bots and network fees</div>`;
   }
 
   // desk: what each part of the bot is doing

@@ -166,9 +166,15 @@ export function analyzeSafety(coin, chainData, ctx) {
   if (h?.rugged) add('bad', `Dev rugged ${h.rugged} of their ${h.finished} past coin${h.finished > 1 ? 's' : ''}`, 'Dev rugged before');
   else if (h?.migrated) add('ok', `Dev's past coins: ${h.migrated} graduated, none rugged`);
 
-  // 5. Concentration
-  const top10 = coin.topHoldersPct(10);
-  add(top10 >= cfg.maxTop10Pct ? 'bad' : top10 >= cfg.maxTop10Pct * 0.75 ? 'warn' : 'ok', `Top 10 holders: ${fmt(top10)}`, 'Top 10 holders too high');
+  // 5. Concentration, counting each bundle / linked-wallet group as ONE holder
+  //    (splitting a bag over many wallets hides how concentrated a coin really is)
+  const owner = new Map();
+  clusters.forEach((c, i) => c.wallets.forEach((w) => { if (w !== coin.creator) owner.set(w, `cluster${i}`); }));
+  for (const w of launch) if (!owner.has(w)) owner.set(w, 'launch-bundle');
+  const entities = new Map();
+  for (const [w, b] of coin.holders()) { const k = owner.get(w) ?? w; entities.set(k, (entities.get(k) ?? 0) + b); }
+  const top10 = pctOfSupply([...entities.values()].sort((a, b) => b - a).slice(0, 10).reduce((a, b) => a + b, 0));
+  add(top10 >= cfg.maxTop10Pct ? 'bad' : top10 >= cfg.maxTop10Pct * 0.75 ? 'warn' : 'ok', `Top 10 holders: ${fmt(top10)} (linked wallets grouped)`, 'Top 10 holders too high');
 
   // 6. Recycled socials (same X/Telegram link used by another coin)
   if (ctx.recycledSocials?.length) add('bad', `Socials reused from ${ctx.recycledSocials.length} other coin(s)`, 'Recycled socials');
@@ -183,5 +189,6 @@ export function analyzeSafety(coin, chainData, ctx) {
     launchBundle: { wallets: launch.size, initialPct: launchInitial, heldPct: launchHeld },
     clusters: clusters.map((c) => ({ size: c.wallets.length, heldPct: c.heldPct, includesDev: c.includesDev, funder: c.funder })),
     devPct, top10Pct: top10, freshPct, sameSizeBuys: sameSize, errors: chainData.errors,
+    devClean: Boolean(h?.migrated && !h?.rugged),
   };
 }
