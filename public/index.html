@@ -161,6 +161,8 @@ const age = (s) => s < 60 ? `${s}s` : s < 3600 ? `${Math.floor(s / 60)}m` : `${M
 const mc = (sol) => state?.status.solUsd ? (sol * state.status.solUsd >= 1e6 ? `$${(sol * state.status.solUsd / 1e6).toFixed(2)}M` : `$${(sol * state.status.solUsd / 1e3).toFixed(1)}k`) : `${sol.toFixed(1)} SOL`;
 const ICON = { ok: '✅', warn: '⚠️', bad: '⛔', info: 'ℹ️' };
 
+// "claude-haiku-5-5" -> "Haiku 5.5"
+const aiName = (id) => { const m = id.match(/^claude-([a-z]+)-(\d+)(?:-(\d+))?/); return m ? `${m[1][0].toUpperCase()}${m[1].slice(1)} ${m[2]}${m[3] ? '.' + m[3] : ''}` : id; };
 function pill(label, on, title = '') { return `<span class="pill ${on ? 'on' : 'off'}" title="${esc(title)}">${label}</span>`; }
 
 function render() {
@@ -168,7 +170,7 @@ function render() {
   $('pills').innerHTML = (s.demo ? '<span class="pill demo">DEMO – fake coins</span>' : '') +
     pill(s.feedConnected ? '● Feed live' : '○ Feed offline', s.feedConnected) +
     pill(`Helius ${s.helius ? 'on' : 'off'}`, s.helius, 'On-chain bundle & funding tracing') +
-    pill(`AI ${s.ai.startsWith('claude') ? 'on' : 'off'}`, s.ai.startsWith('claude'), s.ai) +
+    pill(s.ai.startsWith('claude') ? `AI: ${aiName(s.ai)}` : 'AI off', s.ai.startsWith('claude'), s.ai) +
     pill(`Alerts: ${s.notify.length ? s.notify.join(' + ') : 'off'}`, s.notify.length > 0) +
     pill(s.x.on ? `X ${s.x.error ? 'error' : 'on'}` : s.x.radar ? 'X radar (free)' : 'X off', s.x.on ? !s.x.error : s.x.radar,
       s.x.error || (s.x.on ? `${s.x.posts} posts tracked` : 'Free tweet radar: finds X posts many new coins launch on. Add X_BEARER_TOKEN for the full X watcher.')) +
