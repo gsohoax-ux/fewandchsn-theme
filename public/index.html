@@ -105,6 +105,15 @@
   .l-bad { color: var(--red); } .l-good { color: var(--green); } .l-muted { color: var(--muted); }
   .why { padding: 10px 14px; } .why div { display: grid; grid-template-columns: 1fr auto; gap: 2px 10px; font-size: 13px; margin-bottom: 7px; }
   .why .b { grid-column: 1 / -1; height: 4px; border-radius: 2px; background: var(--line); overflow: hidden; } .why .b i { display: block; height: 100%; background: var(--red); }
+  .board { display: grid; grid-template-columns: 1fr 0.8fr 1fr; gap: 0; }
+  @media (max-width: 900px) { .board { grid-template-columns: 1fr; } }
+  .col { border-right: 1px solid var(--line); min-width: 0; } .col:last-child { border-right: 0; }
+  .col h3 { margin: 0; padding: 10px 12px; font-size: 12px; text-transform: uppercase; letter-spacing: .7px; color: var(--muted); border-bottom: 1px solid var(--line); display: flex; justify-content: space-between; }
+  .col ul { list-style: none; margin: 0; padding: 0; max-height: 360px; overflow: auto; }
+  .col li { display: grid; grid-template-columns: 1fr auto; gap: 2px 8px; padding: 7px 12px; border-bottom: 1px solid var(--line); font-size: 13px; cursor: pointer; }
+  .col li:hover { background: var(--panel2); } .col .sub { color: var(--muted); font-size: 11px; }
+  .col .sc { font-weight: 700; font-size: 12px; padding: 1px 6px; border-radius: 5px; color: #000; }
+  .col .note { padding: 10px 12px; color: var(--muted); font-size: 12px; }
   .disclaimer { color: var(--muted); font-size: 12px; padding: 0 20px 20px; text-align: center; }
   @media (max-width: 700px) {
     .hide-sm { display: none; } td, th { padding: 8px 6px; }
@@ -124,6 +133,7 @@
 <main>
   <section>
     <div class="stats" id="stats"></div>
+    <div class="card" style="margin-bottom:16px"><h2><span>Board</span><span class="muted">tap a coin for details</span></h2><div class="board" id="board"></div></div>
     <div class="card" id="papercard" style="margin-bottom:16px"><h2><span>📄 Paper trading</span><span class="muted">fake money · real coins · follows every alert</span></h2><div class="paper" id="paper"></div></div>
     <div class="card">
       <h2><span>Live ranking</span><span id="updated" class="muted"></span></h2>
@@ -142,6 +152,8 @@
   <aside class="side">
     <div class="card"><h2><span>Desk</span><span class="muted" id="desk-sum"></span></h2><ul class="desk" id="desk"></ul></div>
     <div class="card"><h2><span>Why they died</span><span class="muted">since start</span></h2><div class="why" id="why"></div></div>
+    <div class="card" id="trendcard"><h2><span>📈 Trends to watch</span><span class="muted">multi-site · spike or lasting</span></h2>
+      <div id="trendsrc" class="tags" style="padding:8px 14px 0;display:flex;flex-wrap:wrap;gap:5px;font-size:11px"></div><ul class="posts" id="trends"></ul></div>
     <div class="card" id="xcard"><h2><span>🐦 Posts on X to watch</span><span class="muted">meme-able</span></h2><ul class="posts" id="xposts"></ul></div>
     <div class="card"><h2>🧠 What the bot has learned</h2><div class="learn" id="learn"></div></div>
     <div class="card"><h2>Narratives running now</h2><div class="themes" id="themes"></div></div>
@@ -231,6 +243,38 @@ function render() {
         costs: ${P.rules.feePct.toFixed(2)}% fees per side + slippage, sandwich bots and network fees</div>`;
   }
 
+  // trends
+  const T = state.trends;
+  $('trendcard').style.display = T ? '' : 'none';
+  if (T) {
+    $('trendsrc').innerHTML = Object.entries(T.sources || {}).map(([k, v]) => `<span class="pill ${v.ok ? 'on' : 'off'}" title="${esc(v.error || v.count + ' items')}">${esc(k)} ${v.ok ? '✓' : '✗'}</span>`).join('');
+    $('trends').innerHTML = T.topics.length ? T.topics.map((t) => `<li style="${t.qualified ? '' : 'opacity:.55'}">
+      <div class="who"><b style="color:var(--text)">${esc(t.label)}</b><span>${t.qualified ? (t.spike && t.longevity ? '🔥 spike + lasting' : t.spike ? '⚡ spike' : '📆 lasting') : 'not confirmed yet'}</span></div>
+      <div class="tags" style="margin-top:4px">${t.sources.map((x) => `<span>${esc(x)}</span>`).join('')}<span>${t.days} day${t.days === 1 ? '' : 's'}</span>
+        ${t.traffic ? `<span>~${(t.traffic / 1000).toFixed(0)}k searches</span>` : ''}${t.meme != null ? `<span>meme ${t.meme}</span>` : ''}</div>
+      ${t.thesis ? `<div class="txt">${esc(t.thesis)}</div>` : ''}
+      ${t.ideas?.length ? `<div class="muted" style="font-size:12px">💡 ${t.ideas.map(esc).join(' · ')}</div>` : ''}
+      <div class="coins">${t.coins?.length ? t.coins.map((c) => `<a href="#" data-open="${c.mint}">$${esc(c.symbol)}</a> <span class="${c.verdict ? 'v-' + c.verdict : 'muted'}">${c.score ?? '…'}${c.verdict ? ' ' + c.verdict : ''}</span>`).join(' · ') : (t.qualified ? '<span class="muted">No coin yet — watching Pump.fun</span>' : '')}</div>
+    </li>`).join('') : '<li class="muted">Collecting trends from Google, Wikipedia, Reddit and X…</li>';
+  }
+
+  // board: New Pairs | in between | Final Stretch
+  const B = state.board;
+  if (B) {
+    const row = (c) => `<li data-open="${c.mint}">
+      <span><b>${c.x ? '🐦 ' : ''}${c.trend ? '📈 ' : ''}$${esc(c.symbol)}</b> <span class="sub">${esc(c.name).slice(0, 22)}</span></span>
+      <span>${c.score != null ? `<span class="sc ${c.verdict === 'AVOID' ? 's-r' : c.score >= 70 ? 's-g' : c.score >= 50 ? 's-y' : 's-n'}">${c.score}</span>` : '<span class="sub">…</span>'}</span>
+      <span class="sub">${mc(c.mcSol)} · ${c.progress.toFixed(0)}% · ${age(c.ageSec)} · ${c.buyers} buyers</span>
+      <span class="sub ${c.verdict ? 'v-' + c.verdict : ''}">${c.alerted ? '🔔 ' : ''}${c.verdict ?? ''}</span></li>`;
+    const col = (title, sub, items, empty) => `<div class="col"><h3><span>${title}</span><span>${sub}</span></h3>
+      <ul>${items.length ? items.map(row).join('') : `<div class="note">${empty}</div>`}</ul></div>`;
+    $('board').innerHTML =
+      col('🆕 New pairs', `under ${B.newPairMaxMin} min`, B.newPairs, 'Waiting for launches…') +
+      col('↔ In between', `${B.middleCount} coins`, B.middle, 'Nothing in the middle') +
+      col('🏁 Final stretch', `${B.finalStretchPct}%+ of curve`, B.final, 'No coin close to graduating yet');
+    $('board').insertAdjacentHTML('beforeend', '');
+  }
+
   // desk: what each part of the bot is doing
   const pl = s.pipeline || {};
   const killedPct = pl.scored ? Math.round((pl.filtered / pl.scored) * 100) : 0;
@@ -300,6 +344,8 @@ function openCoin(c) {
     ${c.confidence ? `<h3>🎯 Confidence — <span class="c-${c.confidence.label}">${c.confidence.label} ${c.confidence.meter}</span> (${c.confidence.value})</h3>
       <ul class="flags">${c.confidence.reasons.map((r) => `<li class="muted">${esc(r)}</li>`).join('')}</ul>
       <p class="muted" style="font-size:12px">Confidence = how solid the data behind this score is, not the chance of profit.</p>` : ''}
+    ${c.trend ? `<h3>📈 Trend</h3><p><b>${esc(c.trend.label)}</b> — ${c.trend.sources.map(esc).join(' + ')} · ${c.trend.days} day${c.trend.days === 1 ? '' : 's'}${c.trend.spike ? ' · spiking' : ''}<br>
+      ${c.trend.thesis ? `${esc(c.trend.thesis)}<br>` : ''}<span class="muted">coin ${esc(c.trend.how)} · ${c.trend.coinsOnTrend > 1 ? `#${c.trend.rank} of ${c.trend.coinsOnTrend} coins on it` : 'only coin on it'}</span></p>` : ''}
     ${c.x ? `<h3>🐦 X post</h3><p><a target="_blank" rel="noopener" href="${esc(c.x.url)}">@${esc(c.x.author)}</a>: ${esc(c.x.text)}<br>
       <span class="muted">${c.x.origin === 'radar' ? `📡 ${c.x.radarCoins} coins launched on it` : `❤️ ${c.x.likes.toLocaleString()}`} · viral ${c.x.viral} · meme ${c.x.meme} · coin ${esc(c.x.how)} · ${c.x.coinsOnPost > 1 ? `#${c.x.rank} of ${c.x.coinsOnPost} coins on this post` : 'only coin on this post'}</span></p>` : ''}
     <h3>🛡 Safety — <span class="v-${sf.verdict}">${sf.verdict}</span> (${sf.score})</h3>

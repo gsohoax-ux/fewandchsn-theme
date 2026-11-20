@@ -27,7 +27,7 @@ export function fmtMc(mcSol, solUsd) {
   return usd >= 1e6 ? `$${(usd / 1e6).toFixed(2)}M` : `$${(usd / 1e3).toFixed(1)}k`;
 }
 
-const stageTag = (stage) => ({ mid: 'MID-CURVE', manual: 'CHECK', x: 'X NARRATIVE' }[stage] ?? 'FRESH');
+const stageTag = (stage) => ({ fresh: 'NEW PAIR', mid: 'MID-CURVE', final: 'FINAL STRETCH', manual: 'CHECK', x: 'X NARRATIVE', trend: 'TREND' }[stage] ?? 'NEW PAIR');
 
 function confLine(r) {
   const c = r.confidence;
@@ -38,6 +38,14 @@ function learnedLine(r) {
   const l = r.learned;
   if (!l?.validated) return '';
   return `📊 Learned: ${Math.round(l.p * 100)}% chance of ${l.target}x (average coin ${Math.round(l.baseRate * 100)}%) · from ${l.n} past coins`;
+}
+
+function trendLines(r) {
+  const t = r.trend;
+  if (!t) return [];
+  return [`📈 Trend: ${t.label} — ${t.sources.join(' + ')}${t.days > 1 ? ` · ${t.days} days` : ''}${t.spike ? ' · spiking' : ''} · coin ${t.how}` +
+    (t.coinsOnTrend > 1 ? ` · #${t.rank} of ${t.coinsOnTrend} coins on it` : ''),
+    ...(t.thesis ? [`   ${t.thesis}`] : [])];
 }
 
 function xLines(r) {
@@ -62,6 +70,7 @@ export function formatAlert(coin, r, stage, { solUsd, padreTemplate } = {}) {
     esc(confLine(r)),
     esc(learnedLine(r)),
     ...xLines(r).map(esc),
+    ...trendLines(r).map(esc),
     ...(r.x ? [`<a href="${r.x.url}">Open the X post</a>`] : []),
     '',
     `🧠 <b>Narrative ${n.score}</b>${n.theme ? ` — ${esc(n.theme)}` : ''}${n.freshness && n.freshness !== 'unknown' ? ` (${esc(n.freshness.replace('_', ' '))})` : ''}`,
@@ -88,6 +97,7 @@ export function alertNotification(coin, r, stage, { solUsd, padreTemplate, dashb
     confLine(r),
     learnedLine(r),
     ...xLines(r),
+    ...trendLines(r),
     `🧠 Narrative ${n.score}${n.theme ? ` — ${n.theme}` : ''}${n.summary ? `: ${n.summary}` : ''}`,
     `📈 Momentum ${m.score} — curve ${m.progressPerMin >= 0 ? '+' : ''}${m.progressPerMin.toFixed(1)}%/min, buy/sell ${m.buySellRatio.toFixed(1)}x, ${m.uniqueBuyers2m} buyers in 2m`,
     `🛡 Safety ${s.verdict} (${s.score})`,
@@ -102,7 +112,7 @@ export function alertNotification(coin, r, stage, { solUsd, padreTemplate, dashb
     dashboardUrl && { label: 'Dashboard', url: dashboardUrl },
   ].filter(Boolean);
   return {
-    title: `${stage === 'x' ? '🐦' : r.light} $${coin.symbol} ${r.score}/100 · ${tag}${r.confidence ? ` · ${r.confidence.label} confidence` : ''}`,
+    title: `${stage === 'x' ? '🐦' : stage === 'trend' ? '📈' : r.light} $${coin.symbol} ${r.score}/100 · ${tag}${r.confidence ? ` · ${r.confidence.label} confidence` : ''}`,
     message, priority: r.score >= 75 ? 5 : 4, click: links.padre || links.pump, actions,
   };
 }

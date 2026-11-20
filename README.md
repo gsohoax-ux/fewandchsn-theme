@@ -117,6 +117,40 @@ It answers *"how much should I trust this score?"*, not *"will it go up?"*:
 
 Tap a coin on the dashboard to see exactly why its confidence is what it is.
 
+### 🆕 New Pairs and 🏁 Final Stretch
+
+The dashboard **Board** splits live coins like Padre/Axiom do:
+- **🆕 New pairs:** under 15 minutes old (`NEW_PAIR_MAX_MIN`). Coins are scored once they have about 15 **real**
+  buyers. Launch-moment bundles and linked wallets don't count.
+- **↔ In between:** the middle of the curve. Coins here are past the early-price advantage but not yet
+  close to graduating, and most die here. They are shown so you can watch them, but they aren't alerted by
+  default (`MID_PROGRESS_PCT`=0).
+- **🏁 Final stretch:** 70%+ of the curve (`FINAL_STRETCH_PCT`). Each coin is scored again here and can alert
+  as **FINAL STRETCH**. These coins graduate more often, and paper trading sells half at 92% and the rest
+  shortly after graduation.
+
+A coin gets at most one alert per 10 minutes, except when it reaches the Final Stretch.
+
+### 📈 Trend scanner (free, always on)
+
+Finds what's trending **across the internet** that could become a coin, and checks it from several angles:
+
+| Source | Signal |
+|---|---|
+| Google Trends (trending now, `TREND_GEO`=US) | Search volume: the **spike** signal |
+| Wikipedia most-viewed articles | Attention over days: the **lasting** signal |
+| Reddit r/popular (`TREND_REDDIT`) | Memes and viral moments |
+| X (tweet radar / X watcher) | Posts coins are launching on |
+| Pump.fun | Themes of coins actually pumping |
+
+A trend only **counts** when it's on **2 or more sites** and is **either spiking** (`TREND_SPIKE_TRAFFIC`=200k
+searches, a 3x Wikipedia jump, or 3+ sites within 6 hours) **or lasting** (seen on 2+ days). With an AI key,
+each trend gets a **thesis**: meme potential, spike vs lasting, and likely coin names and tickers.
+
+You get a **📈 Trend** phone alert for strong trends (meme potential ≥ `TREND_ALERT_MIN`=65), and a
+**📈 TREND** coin alert when the **leading coin** on a trend is **rising and SAFE**. The dashboard shows
+**Trends to watch**, with each site's status and the coins found for each trend.
+
 ### 📡 Free tweet radar (always on, no key needed)
 
 Coin creators often launch on a viral tweet and put its link in the coin's socials. When

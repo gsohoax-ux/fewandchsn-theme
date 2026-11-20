@@ -99,6 +99,21 @@ export class Notifier {
     ]);
   }
 
+  /** A new cross-site trend that could become a coin. */
+  async trend(t) {
+    const title = `${this.prefix}📈 Trend: ${t.label} (${t.sources.join(' + ')})`;
+    const message = [
+      `${t.kind || (t.spike ? 'spike' : 'lasting')}${t.days > 1 ? ` · ${t.days} days` : ''}${t.peakTraffic ? ` · ~${t.peakTraffic.toLocaleString()} searches` : ''} · meme potential ${t.meme ?? '?'}`,
+      t.thesis || '',
+      t.ideas?.length ? `Likely coins: ${t.ideas.join(', ')}` : '',
+      'Watching Pump.fun - you get an alert if a coin on it is rising and SAFE.',
+    ].filter(Boolean).join('\n');
+    await Promise.all([
+      this.ntfy?.send({ title, message, priority: 3 }),
+      this.telegram?.send(`<b>${title.replace(/[<>&]/g, '')}</b>\n${message.replace(/[<>&]/g, '')}`),
+    ]);
+  }
+
   async info(text) {
     await Promise.all([
       this.ntfy?.send({ title: this.prefix + 'Memecoin bot', message: text, priority: 2 }),

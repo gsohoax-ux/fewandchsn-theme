@@ -180,7 +180,7 @@ test('ntfy alert payload has title, CA, tap link and buttons', async () => {
     narrative: { score: 70, theme: 'hamster', summary: 'fits meta', redFlags: [] },
     momentum: { score: 75, holders: 40, progressPerMin: 5, buySellRatio: 2, uniqueBuyers2m: 20 } };
   const n = alertNotification(coin, r, 'fresh', { padreTemplate: 'https://padre.example/{mint}', dashboardUrl: 'http://d' });
-  assert.equal(n.title, '🟢 $TST 78/100 · FRESH');
+  assert.equal(n.title, '🟢 $TST 78/100 · NEW PAIR');
   assert.ok(n.message.endsWith('CA: MINT'));
   assert.equal(n.click, 'https://padre.example/MINT');
   assert.equal(n.priority, 5);

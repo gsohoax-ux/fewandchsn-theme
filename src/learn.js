@@ -31,7 +31,7 @@ export const FEATURES = [
   ['xpost', 'Rides an X post'],
   ['dexpaid', 'Dex paid'],
   ['devsold', 'Dev sold'],
-  ['mid', 'Scored at mid-curve'],
+  ['mid', 'Scored later on the curve'],
 ];
 
 /** Turn a scored coin into numbers between 0 and 1. */
@@ -46,7 +46,7 @@ export function featurize(coin, r, stage) {
     buysell: (m.buySellRatio ?? 0) / 5, wash: (m.washPct ?? 0) / 100, dust: (m.dustPct ?? 0) / 100,
     holders: (m.holders ?? 0) / 200, drawdown: (m.drawdownPct ?? 0) / 100, age: coin.ageSec() / 1800,
     twitter: meta.twitter ? 1 : 0, telegram: meta.telegram ? 1 : 0, website: meta.website ? 1 : 0,
-    xpost: r.x ? 1 : 0, dexpaid: r.dexPaid ? 1 : 0, devsold: coin.devSold ? 1 : 0, mid: stage === 'mid' ? 1 : 0,
+    xpost: r.x ? 1 : 0, dexpaid: r.dexPaid ? 1 : 0, devsold: coin.devSold ? 1 : 0, mid: stage === 'mid' || stage === 'final' ? 1 : 0,
   };
   return FEATURES.map(([k]) => clamp01(f[k]));
 }

@@ -61,6 +61,7 @@ export class Coin {
     this.lastEvalAt = 0;
     this.freshDone = false;
     this.midDone = false;
+    this.finalDone = false;
     this.result = null;            // latest full evaluation
     this.alert = null;             // {stage, at, mcSol, score}
     this.peakMcSinceAlert = 0;

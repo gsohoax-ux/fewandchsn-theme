@@ -56,6 +56,15 @@ export const config = {
   radarWindowMin: num('RADAR_WINDOW_MIN', 60),
   radarAlerts: env('RADAR_ALERTS', '1') === '1',
 
+  // Trend scanner (free): Google Trends + Wikipedia + Reddit + X radar + Pump.fun themes
+  trends: env('TRENDS', '1') === '1',
+  trendGeo: env('TREND_GEO', 'US'),
+  trendPollMin: num('TREND_POLL_MIN', 15),
+  trendSpikeTraffic: num('TREND_SPIKE_TRAFFIC', 200000),  // Google searches that count as a big spike
+  trendReddit: env('TREND_REDDIT', '1') === '1',
+  trendAlerts: env('TREND_ALERTS', '1') === '1',
+  trendAlertMin: num('TREND_ALERT_MIN', 65),             // meme potential needed for a phone alert about a trend
+
   // Self-learning
   learnTarget: num('LEARN_TARGET', 1.5),             // "a hit" = coin reached this multiple after scoring
   learnHorizonMin: num('LEARN_HORIZON_MIN', 120),    // how long after scoring we watch the outcome
@@ -106,7 +115,9 @@ export const config = {
   freshMinBuyers: num('FRESH_MIN_BUYERS', 15),
   freshMinAgeSec: num('FRESH_MIN_AGE_SEC', 20),
   freshMaxAgeSec: num('FRESH_MAX_AGE_SEC', 900),
-  midProgressPct: num('MID_PROGRESS_PCT', 35),
+  finalStretchPct: num('FINAL_STRETCH_PCT', 70),    // Final Stretch: coins this close to graduating get scored again
+  newPairMaxMin: num('NEW_PAIR_MAX_MIN', 15),         // dashboard: coins younger than this are New Pairs
+  midProgressPct: num('MID_PROGRESS_PCT', 0),         // optional mid-curve check (0 = off: the middle rarely pays)
   recheckEverySec: num('RECHECK_EVERY_SEC', 45),
 
   // Alerting threshold

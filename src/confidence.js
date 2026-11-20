@@ -21,6 +21,7 @@ export function computeConfidence(coin, r, { runnersSeen = 0, history = null } =
   add(10, runnersSeen >= 5, null, 'bot is still learning the current meta');
   add(10, Boolean(coin.meta && (coin.meta.description || coin.meta.twitter)), null, 'no coin description/socials loaded');
   add(10, Boolean(r.x?.viral >= 50), 'rides a viral X post', null);
+  add(10, (r.trend?.sources?.length ?? 0) >= 2, `trend confirmed on ${r.trend?.sources?.length ?? 0} sites`, null);
   add(15, Boolean(r.learned?.validated), `learned from ${r.learned?.n ?? 0} past coins`, null);
 
   // Agreement between the three parts (big spread = mixed signals)

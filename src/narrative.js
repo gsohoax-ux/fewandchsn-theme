@@ -165,6 +165,37 @@ Most posts deserve under 40. For each post give the coin a trader would expect a
 /** Models that accept the server-side refusal fallback (Haiku does not). */
 export const supportsFallback = (model) => /^claude-(opus-5|sonnet-5-5|fable-5-[12])/.test(model);
 
+const TREND_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['items'],
+  properties: {
+    items: {
+      type: 'array',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['id', 'meme_score', 'kind', 'thesis', 'coin_ideas', 'keywords'],
+        properties: {
+          id: { type: 'string' },
+          meme_score: { type: 'integer', description: '0-100 chance this trend spawns a Pump.fun coin people pile into' },
+          kind: { type: 'string', enum: ['spike', 'lasting', 'spike + lasting', 'not memeable'] },
+          thesis: { type: 'string', description: 'One or two sentences: why it could (or could not) work as a meme coin, and for how long' },
+          coin_ideas: { type: 'array', items: { type: 'string' }, description: 'Likely coin names with tickers, e.g. "Wizard Goose ($WGOOSE)"' },
+          keywords: { type: 'array', items: { type: 'string' }, description: '2-6 words/phrases such coins would use in name or ticker' },
+        },
+      },
+    },
+  },
+};
+
+const TREND_SYSTEM = `You judge whether things trending across the internet right now are likely to become
+Solana meme coins on Pump.fun that traders pile into. Strong candidates: a funny or absurd moment, an
+animal or character, a catchy phrase, a celebrity or viral person doing something memeable, internet
+culture, crypto-adjacent news. Weak: sports scores, routine politics, deaths and tragedies, company
+earnings, weather, TV listings - unless there is an obvious meme angle. Spikes fade within days; lasting
+trends (several days on several sites) support coins for longer. Be calibrated: most trends deserve under 40.`;
+
 export class AiNarrator {
   constructor({ apiKey, model, maxPerHour }) {
     this.apiKey = apiKey; this.model = model; this.maxPerHour = maxPerHour;
@@ -219,6 +250,16 @@ export class AiNarrator {
     const prompt = posts.map((p) => `[${p.id}] @${p.author} (${p.followers} followers, ${p.metrics.likes} likes, ` +
       `${p.metrics.retweets} reposts${p.hasMedia ? ', has image/video' : ''}): ${p.text.replace(/\s+/g, ' ').slice(0, 400)}`).join('\n');
     const j = await this.#ask(TWEET_SYSTEM, prompt, TWEET_SCHEMA);
+    return new Map((j.items ?? []).map((i) => [String(i.id), i]));
+  }
+
+  /** Thesis for cross-site trends: could this become a meme coin, spike or lasting? */
+  async trendTheses(topics) {
+    this.#budget();
+    const prompt = topics.map((t) => `[${t.id}] "${t.label}" · seen on ${t.sources.join(', ')} · ${t.days} day(s)` +
+      `${t.traffic ? ` · ~${t.traffic.toLocaleString()} Google searches` : ''}${t.views ? ` · ${t.views.toLocaleString()} Wikipedia views` : ''}` +
+      `${t.spike ? ' · SPIKING' : ''}${t.details.length ? ` · context: ${t.details.join(' | ')}` : ''}`).join('\n');
+    const j = await this.#ask(TREND_SYSTEM, prompt, TREND_SCHEMA);
     return new Map((j.items ?? []).map((i) => [String(i.id), i]));
   }
 

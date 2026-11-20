@@ -112,7 +112,8 @@ export function startServer({ engine, store, cfg, log = console }) {
     if (url.pathname === '/api/state') {
       return json(res, {
         status: engine.status(), coins: engine.ranked(80), xPosts: engine.xPosts(12),
-        events: engine.events.slice(-60).reverse(), movers: engine.movers(),
+        events: engine.events.slice(-60).reverse(), movers: engine.movers(), board: engine.board(),
+        trends: engine.trendView?.() ?? [],
         reasons: [...engine.kills].sort((a, b) => b[1] - a[1]).slice(0, 10),
         paper: engine.paper?.enabled ? engine.paper.view(engine.coins, engine.solUsd) : null,
         alerts: store.recentAlerts(40), stats: store.stats(),
