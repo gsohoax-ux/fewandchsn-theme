@@ -35,7 +35,7 @@ const engine = new Engine({ cfg, feed, chain, store, notifier, ai, xwatch, learn
 
 // Telegram commands (only used if you set up Telegram too)
 telegram.on('help', async () => [
-  '<b>pump-scout commands</b>',
+  '<b>Memecoin Bot commands</b>',
   '/top - best coins right now',
   '/check &lt;contract address&gt; - full scorecard of a tracked coin',
   '/stats - how past alerts performed',

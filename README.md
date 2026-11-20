@@ -184,8 +184,17 @@ pm2 logs pump-scout         # see what it's doing
 
 ### Dashboard
 
-Open `http://YOUR-SERVER-IP:8080` in your browser or phone.
-**Set `DASHBOARD_PASSWORD` in `.env`** first, so nobody else can see it.
+Open `http://YOUR-SERVER-IP:8080` (or your Railway link) in your browser or phone.
+**Set `DASHBOARD_PASSWORD`** first, so nobody else can see it. You log in once, and it remembers
+you for a year on that device.
+
+**Install it as an app** to get its own icon, full screen, and no browser bar:
+- **iPhone:** open the link in **Safari** → tap **Share** → **Add to Home Screen** → **Add**.
+- **Android:** open the link in **Chrome** → tap **⋮** → **Install app** (or **Add to Home screen**).
+- **Computer (Chrome/Edge):** click the install icon at the right of the address bar.
+
+The app shows live data from your bot. The bot itself keeps running on the server, so alerts
+still arrive through ntfy when the app is closed.
 
 ### Padre button in alerts (optional)
 

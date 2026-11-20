@@ -2,8 +2,16 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>pump-scout</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Memecoin Bot</title>
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" href="/icon-192.png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<meta name="theme-color" content="#12151d">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Memecoin Bot">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <style>
   :root {
     --bg: #0b0d12; --panel: #12151d; --panel2: #171b25; --line: #232838; --text: #e6e8ee; --muted: #8a91a5;
@@ -11,7 +19,8 @@
   }
   * { box-sizing: border-box; }
   body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.4 ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
-  header { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; padding: 14px 20px; border-bottom: 1px solid var(--line); background: var(--panel); position: sticky; top: 0; z-index: 5; }
+  header { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center;
+    padding: calc(14px + env(safe-area-inset-top)) calc(20px + env(safe-area-inset-right)) 14px calc(20px + env(safe-area-inset-left)); border-bottom: 1px solid var(--line); background: var(--panel); position: sticky; top: 0; z-index: 5; }
   h1 { font-size: 17px; margin: 0; letter-spacing: .3px; }
   h1 span { color: var(--accent); }
   .pills { display: flex; flex-wrap: wrap; gap: 6px; }
@@ -73,14 +82,23 @@
   .learn .bar { width: 100%; margin: 8px 0 4px; }
   .learn ul { list-style: none; padding: 0; margin: 8px 0 0; }
   .learn li { padding: 2px 0; }
+  body { padding-bottom: env(safe-area-inset-bottom); }
+  h1 img { width: 22px; height: 22px; border-radius: 6px; vertical-align: -4px; margin-right: 8px; }
+  .logout { margin-left: auto; color: var(--muted); font-size: 12px; text-decoration: none; }
   .disclaimer { color: var(--muted); font-size: 12px; padding: 0 20px 20px; text-align: center; }
-  @media (max-width: 700px) { .hide-sm { display: none; } td, th { padding: 8px 6px; } }
+  @media (max-width: 700px) {
+    .hide-sm { display: none; } td, th { padding: 8px 6px; }
+    .stats { grid-template-columns: repeat(4, 1fr); gap: 6px; margin-bottom: 10px; }
+    .stat { padding: 7px 8px; border-radius: 8px; } .stat b { font-size: 15px; } .stat small { font-size: 10px; line-height: 1.2; display: block; }
+    header { gap: 6px 10px; } .pill { font-size: 11px; padding: 2px 7px; } .logout { margin-left: 0; }
+  }
 </style>
 </head>
 <body>
 <header>
-  <h1>pump<span>·</span>scout</h1>
+  <h1><img src="/icon-192.png" alt="">memecoin<span>·</span>bot</h1>
   <div class="pills" id="pills"></div>
+  <a class="logout" href="/logout">Log out</a>
 </header>
 <main>
   <section>
@@ -223,9 +241,15 @@ document.addEventListener('click', (e) => {
 });
 
 async function refresh() {
-  try { state = await (await fetch('api/state')).json(); render(); } catch {}
+  try {
+    const r = await fetch('/api/state', { cache: 'no-store' });
+    if (r.status === 401) return location.reload(); // session ended: show the login screen
+    state = await r.json(); render();
+  } catch {}
 }
 refresh(); setInterval(refresh, 3000);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) refresh(); }); // instant update when the app is reopened
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
 </script>
 </body>
 </html>
