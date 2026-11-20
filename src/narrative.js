@@ -160,6 +160,9 @@ threads, politics without a funny hook, posts that are already old news.
 Most posts deserve under 40. For each post give the coin a trader would expect and the keywords
 (names, phrases, tickers) such coins would use in their name or ticker.`;
 
+/** Models that accept the server-side refusal fallback (Haiku does not). */
+export const supportsFallback = (model) => /^claude-(opus-5|sonnet-5-5|fable-5-[12])/.test(model);
+
 export class AiNarrator {
   constructor({ apiKey, model, maxPerHour }) {
     this.apiKey = apiKey; this.model = model; this.maxPerHour = maxPerHour;
@@ -190,15 +193,18 @@ export class AiNarrator {
 
   async #ask(system, prompt, schema) {
     const client = await this.#getClient();
-    const response = await client.beta.messages.create({
+    const params = {
       model: this.model,
       max_tokens: 8000,
-      betas: ['server-side-fallback-2026-07-01'],
-      fallbacks: 'default',
       output_config: { effort: 'low', format: { type: 'json_schema', schema } },
       system,
       messages: [{ role: 'user', content: prompt }],
-    });
+    };
+    // Server-side fallback (retry on another model if one declines) exists for the larger models only;
+    // Haiku has none, so it gets a plain request.
+    const response = supportsFallback(this.model)
+      ? await client.beta.messages.create({ ...params, betas: ['server-side-fallback-2026-07-01'], fallbacks: 'default' })
+      : await client.messages.create(params);
     if (response.stop_reason === 'refusal') throw new Error('AI declined');
     const text = response.content.find((b) => b.type === 'text')?.text;
     if (!text) throw new Error(`AI returned no text (stop: ${response.stop_reason})`);
