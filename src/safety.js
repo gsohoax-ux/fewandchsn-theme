@@ -112,7 +112,7 @@ export function largestSameSizeGroup(amounts) {
 export function analyzeSafety(coin, chainData, ctx) {
   const { cfg } = ctx;
   const flags = [];
-  const add = (level, text) => flags.push({ level, text });
+  const add = (level, text, cat = '') => flags.push({ level, text, cat });
   const fmt = (n) => `${n.toFixed(1)}%`;
 
   // 1. Launch-block (bundle) buys
@@ -123,7 +123,7 @@ export function analyzeSafety(coin, chainData, ctx) {
   if (launch.size === 0) add('ok', `No bundle at launch (${how})`);
   else {
     const lvl = launchInitial >= cfg.maxBundlePct ? 'bad' : launchInitial >= cfg.maxBundlePct / 2 ? 'warn' : 'ok';
-    add(lvl, `Bundled at launch: ${fmt(launchInitial)} in ${launch.size} wallet${launch.size > 1 ? 's' : ''} (${how}), still holding ${fmt(launchHeld)}`);
+    add(lvl, `Bundled at launch: ${fmt(launchInitial)} in ${launch.size} wallet${launch.size > 1 ? 's' : ''} (${how}), still holding ${fmt(launchHeld)}`, 'Bundled at launch');
   }
 
   // 2. Funding-linked clusters
@@ -135,7 +135,7 @@ export function analyzeSafety(coin, chainData, ctx) {
   else if (!clusters.length) add('ok', 'No linked wallets among early buyers');
   else {
     const lvl = clusterHeld >= cfg.maxBundlePct || devLinked ? 'bad' : 'warn';
-    add(lvl, `${clusterWallets} early wallets share funders${devLinked ? ' (linked to DEV)' : ''}, holding ${fmt(clusterHeld)}`);
+    add(lvl, `${clusterWallets} early wallets share funders${devLinked ? ' (linked to DEV)' : ''}, holding ${fmt(clusterHeld)}`, 'Linked wallets');
   }
 
   // 3. Fresh wallets among early buyers
@@ -144,31 +144,34 @@ export function analyzeSafety(coin, chainData, ctx) {
   const fresh = checked.filter((w) => chainData.wallets.get(w).fresh);
   const freshPct = checked.length ? (fresh.length / checked.length) * 100 : 0;
   if (checked.length >= 5) {
-    if (freshPct >= 60) add('warn', `${fresh.length}/${checked.length} early buyers are brand-new wallets`);
+    if (freshPct >= 60) add('warn', `${fresh.length}/${checked.length} early buyers are brand-new wallets`, 'Fresh-wallet farm');
     else add('ok', `Fresh wallets among early buyers: ${fresh.length}/${checked.length}`);
   }
 
   // 3b. Identical-size buys right after launch: a script buying from many wallets
   const early5s = coin.trades.filter((t) => t.side === 'buy' && t.trader !== coin.creator && t.ts - coin.createdAt <= 5000 && t.sol >= 0.05);
   const sameSize = largestSameSizeGroup(early5s.map((t) => t.sol));
-  if (sameSize >= 4) add('bad', `${sameSize} identical-size buys in the first 5s (scripted bundle)`);
-  else if (sameSize === 3) add('warn', '3 identical-size buys in the first 5s');
+  if (sameSize >= 4) add('bad', `${sameSize} identical-size buys in the first 5s (scripted bundle)`, 'Scripted bundle');
+  else if (sameSize === 3) add('warn', '3 identical-size buys in the first 5s', 'Scripted bundle');
 
   // 4. Dev
   const devPct = coin.devPct();
   if (coin.devSold && coin.devSoldPct >= 90) add('info', 'Dev sold out');
-  else if (coin.devSold) add('warn', `Dev is selling (${coin.devSoldPct.toFixed(0)}% of their bag)`);
-  if (devPct >= cfg.maxDevPct) add('bad', `Dev holds ${fmt(devPct)}`);
+  else if (coin.devSold) add('warn', `Dev is selling (${coin.devSoldPct.toFixed(0)}% of their bag)`, 'Dev selling');
+  if (devPct >= cfg.maxDevPct) add('bad', `Dev holds ${fmt(devPct)}`, 'Dev holds too much');
   else if (!coin.devSold) add(devPct >= cfg.maxDevPct / 2 ? 'warn' : 'ok', `Dev holds ${fmt(devPct)}`);
-  if (ctx.devLaunches24h >= 5) add('bad', `Serial launcher: dev made ${ctx.devLaunches24h} coins in 24h`);
-  else if (ctx.devLaunches24h >= 2) add('warn', `Dev made ${ctx.devLaunches24h} coins in 24h`);
+  if (ctx.devLaunches24h >= 5) add('bad', `Serial launcher: dev made ${ctx.devLaunches24h} coins in 24h`, 'Serial launcher');
+  else if (ctx.devLaunches24h >= 2) add('warn', `Dev made ${ctx.devLaunches24h} coins in 24h`, 'Serial launcher');
+  const h = ctx.devHistory;
+  if (h?.rugged) add('bad', `Dev rugged ${h.rugged} of their ${h.finished} past coin${h.finished > 1 ? 's' : ''}`, 'Dev rugged before');
+  else if (h?.migrated) add('ok', `Dev's past coins: ${h.migrated} graduated, none rugged`);
 
   // 5. Concentration
   const top10 = coin.topHoldersPct(10);
-  add(top10 >= cfg.maxTop10Pct ? 'bad' : top10 >= cfg.maxTop10Pct * 0.75 ? 'warn' : 'ok', `Top 10 holders: ${fmt(top10)}`);
+  add(top10 >= cfg.maxTop10Pct ? 'bad' : top10 >= cfg.maxTop10Pct * 0.75 ? 'warn' : 'ok', `Top 10 holders: ${fmt(top10)}`, 'Top 10 holders too high');
 
   // 6. Recycled socials (same X/Telegram link used by another coin)
-  if (ctx.recycledSocials?.length) add('bad', `Socials reused from ${ctx.recycledSocials.length} other coin(s)`);
+  if (ctx.recycledSocials?.length) add('bad', `Socials reused from ${ctx.recycledSocials.length} other coin(s)`, 'Recycled socials');
 
   const bad = flags.filter((f) => f.level === 'bad').length;
   const warn = flags.filter((f) => f.level === 'warn').length;

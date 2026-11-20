@@ -14,6 +14,11 @@ export function curveProgress(vTokensInBondingCurve) {
 
 export const pctOfSupply = (tokens) => (tokens / TOTAL_SUPPLY) * 100;
 
+/** Tokens received for `sol` SOL on the bonding curve (constant product on virtual reserves). */
+export function quoteBuy(vSol, vTokens, sol) { return vTokens - (vSol * vTokens) / (vSol + sol); }
+/** SOL received for selling `tokens` on the bonding curve. */
+export function quoteSell(vSol, vTokens, tokens) { return vSol - (vSol * vTokens) / (vTokens + tokens); }
+
 export class Coin {
   constructor(msg, now = Date.now()) {
     this.mint = msg.mint;
@@ -38,6 +43,7 @@ export class Coin {
     this.mcSol = Number(msg.marketCapSol ?? 0);
     this.progress = curveProgress(this.vTokens);
     this.athMcSol = this.mcSol;
+    this.startMcSol = this.mcSol;
 
     if (this.creator && this.initialBuyTokens > 0) {
       this.balances.set(this.creator, this.initialBuyTokens);
@@ -124,6 +130,13 @@ export class Coin {
       .sort((a, b) => a[1] - b[1])
       .slice(0, n)
       .map(([w]) => w);
+  }
+
+  /** Market cap (SOL) at (or just before) a past timestamp. */
+  mcAt(ts) {
+    let mc = this.trades[0]?.mcSol ?? this.mcSol;
+    for (const t of this.trades) { if (t.ts > ts) break; mc = t.mcSol; }
+    return mc;
   }
 
   /** Progress value at (or just before) a past timestamp. */

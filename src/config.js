@@ -68,6 +68,19 @@ export const config = {
   // Free DexScreener check (did the dev pay for a DexScreener profile/boost?)
   dexCheck: env('DEX_CHECK', '1') === '1',
 
+  // Paper trading (fake money) - tests whether following the alerts would make money
+  paper: env('PAPER', '1') === '1',
+  paperStartSol: num('PAPER_START_SOL', 2),          // changing this starts a fresh paper account
+  paperSizePct: num('PAPER_SIZE_PCT', 8),            // % of equity per trade
+  paperMaxOpen: num('PAPER_MAX_OPEN', 5),
+  paperStopPct: num('PAPER_STOP_PCT', 25),           // sell if down this %
+  paperTrailStartPct: num('PAPER_TRAIL_START_PCT', 30), // trailing stop starts after this gain
+  paperTrailPct: num('PAPER_TRAIL_PCT', 20),         // ...and sells after this drop from the best value
+  paperMaxHoldMin: num('PAPER_MAX_HOLD_MIN', 90),
+  paperFeePct: num('PAPER_FEE_PCT', 1.25),           // Pump.fun trading fee per side
+  paperTxFeeSol: num('PAPER_TX_FEE_SOL', 0.002),     // network + priority fee per transaction
+  paperSlippagePct: num('PAPER_SLIPPAGE_PCT', 3),    // extra slippage from being slower than snipers
+
   // Dashboard
   port: num('PORT', 8080),
   dashboardPassword: env('DASHBOARD_PASSWORD'),

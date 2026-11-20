@@ -85,6 +85,26 @@
   body { padding-bottom: env(safe-area-inset-bottom); }
   h1 img { width: 22px; height: 22px; border-radius: 6px; vertical-align: -4px; margin-right: 8px; }
   .logout { margin-left: auto; color: var(--muted); font-size: 12px; text-decoration: none; }
+  .ticker { display: flex; gap: 18px; overflow-x: auto; white-space: nowrap; padding: 8px 20px; border-bottom: 1px solid var(--line);
+    background: var(--bg); font-size: 13px; scrollbar-width: none; } .ticker::-webkit-scrollbar { display: none; }
+  .ticker a { color: var(--text); text-decoration: none; } .ticker b { margin-right: 6px; }
+  .paper { padding: 14px; } .paper .big { font-size: 34px; font-weight: 800; letter-spacing: -.5px; font-variant-numeric: tabular-nums; }
+  .paper .row { display: flex; flex-wrap: wrap; gap: 4px 14px; align-items: baseline; }
+  .paper svg { width: 100%; height: 70px; display: block; margin: 8px 0; }
+  .mini { list-style: none; padding: 0; margin: 6px 0 0; font-size: 13px; } .mini li { display: flex; justify-content: space-between; gap: 8px; padding: 4px 0; border-top: 1px solid var(--line); }
+  .rules { font-size: 11px; color: var(--muted); margin-top: 8px; }
+  .desk { list-style: none; margin: 0; padding: 0; } .desk li { display: grid; grid-template-columns: 26px 1fr auto; gap: 8px; align-items: center; padding: 9px 14px; border-bottom: 1px solid var(--line); }
+  .desk .ic { width: 26px; height: 26px; border-radius: 7px; display: grid; place-items: center; font-size: 14px; }
+  .desk li > span:nth-child(2) { min-width: 0; }
+  .desk small { display: block; color: var(--muted); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; } .desk .n { font-variant-numeric: tabular-nums; font-size: 13px; }
+  .logger { list-style: none; margin: 0; padding: 0; max-height: 330px; overflow: auto; font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .logger li { padding: 4px 14px; border-bottom: 1px solid var(--line); }
+  .logger .t { color: var(--muted); margin-right: 6px; } .logger .a { font-weight: 700; margin-right: 4px; }
+  .a-FILTER { color: #ff9f43; } .a-ANALYST { color: var(--accent); } .a-ALERT { color: var(--green); } .a-EXECUTOR { color: #4cd6c0; }
+  .a-RISK { color: #d27bff; } .a-WATCH { color: var(--yellow); } .a-RADAR { color: var(--blue); }
+  .l-bad { color: var(--red); } .l-good { color: var(--green); } .l-muted { color: var(--muted); }
+  .why { padding: 10px 14px; } .why div { display: grid; grid-template-columns: 1fr auto; gap: 2px 10px; font-size: 13px; margin-bottom: 7px; }
+  .why .b { grid-column: 1 / -1; height: 4px; border-radius: 2px; background: var(--line); overflow: hidden; } .why .b i { display: block; height: 100%; background: var(--red); }
   .disclaimer { color: var(--muted); font-size: 12px; padding: 0 20px 20px; text-align: center; }
   @media (max-width: 700px) {
     .hide-sm { display: none; } td, th { padding: 8px 6px; }
@@ -100,9 +120,11 @@
   <div class="pills" id="pills"></div>
   <a class="logout" href="/logout">Log out</a>
 </header>
+<div class="ticker" id="ticker"></div>
 <main>
   <section>
     <div class="stats" id="stats"></div>
+    <div class="card" id="papercard" style="margin-bottom:16px"><h2><span>📄 Paper trading</span><span class="muted">fake money · follows every alert</span></h2><div class="paper" id="paper"></div></div>
     <div class="card">
       <h2><span>Live ranking</span><span id="updated" class="muted"></span></h2>
       <div style="overflow-x:auto">
@@ -115,8 +137,11 @@
         </table>
       </div>
     </div>
+    <div class="card" style="margin-top:16px"><h2><span>📜 Logger</span><span class="muted">why the bot did what it did</span></h2><ul class="logger" id="logger"></ul></div>
   </section>
   <aside class="side">
+    <div class="card"><h2><span>Desk</span><span class="muted" id="desk-sum"></span></h2><ul class="desk" id="desk"></ul></div>
+    <div class="card"><h2><span>Why they died</span><span class="muted">since start</span></h2><div class="why" id="why"></div></div>
     <div class="card" id="xcard"><h2><span>🐦 Posts on X to watch</span><span class="muted">meme-able</span></h2><ul class="posts" id="xposts"></ul></div>
     <div class="card"><h2>🧠 What the bot has learned</h2><div class="learn" id="learn"></div></div>
     <div class="card"><h2>Narratives running now</h2><div class="themes" id="themes"></div></div>
@@ -164,6 +189,64 @@ function render() {
       <div class="muted" style="font-size:11px;margin-top:4px">▲ = more of this, more pumps · ▼ = more of this, fewer pumps</div>` : ''}`;
   $('themes').innerHTML = s.hotThemes.length ? s.hotThemes.map((t) => `<span class="chip">${esc(t.word)} · ${t.count}</span>`).join('')
     : '<span class="muted">Learning from coins that pump…</span>';
+  // ticker: biggest movers in the last 5 minutes (not AVOID)
+  const mv = state.movers || [];
+  $('ticker').style.display = mv.length ? '' : 'none';
+  $('ticker').innerHTML = mv.map((m) => `<a href="#" data-open="${m.mint}"><b>$${esc(m.symbol)}</b>${mc(m.mcSol)} <span class="up">+${m.changePct.toFixed(0)}%</span></a>`).join('');
+
+  // paper trading
+  const P = state.paper;
+  const sgn = (v, d = 0) => `${v >= 0 ? '+' : ''}${v.toFixed(d)}`;
+  $('papercard').style.display = P ? '' : 'none';
+  if (P) {
+    const usd = (sol) => P.solUsd ? `$${(sol * P.solUsd).toLocaleString(undefined, { maximumFractionDigits: 2, minimumFractionDigits: 2 })}` : `${sol.toFixed(3)} SOL`;
+    const h = P.history.length ? P.history.map((x) => x[1]) : [P.startSol, P.equitySol];
+    const lo = Math.min(...h, P.startSol), hi = Math.max(...h, P.startSol), span = hi - lo || 1;
+    const pts = h.map((v, i) => `${(i / Math.max(1, h.length - 1)) * 100},${66 - ((v - lo) / span) * 62}`).join(' ');
+    const base = 66 - ((P.startSol - lo) / span) * 62;
+    const col = P.pnlSol >= 0 ? 'var(--green)' : 'var(--red)';
+    $('paper').innerHTML = `
+      <div class="row"><span class="big">${usd(P.equitySol)}</span>
+        <span class="${P.pnlSol >= 0 ? 'up' : 'down'}">${P.pnlSol >= 0 ? '+' : ''}${usd(P.pnlSol)} (${P.pnlPct >= 0 ? '+' : ''}${P.pnlPct.toFixed(1)}%)</span>
+        <span class="muted">${(P.equitySol / P.startSol).toFixed(2)}x · started ${usd(P.startSol)}</span></div>
+      <svg viewBox="0 0 100 70" preserveAspectRatio="none"><line x1="0" x2="100" y1="${base}" y2="${base}" stroke="var(--line)" stroke-dasharray="2 2" vector-effect="non-scaling-stroke"/>
+        <polyline points="${pts}" fill="none" stroke="${col}" stroke-width="2" vector-effect="non-scaling-stroke"/></svg>
+      <div class="row muted" style="font-size:12px"><span>${P.trades} closed trade${P.trades === 1 ? '' : 's'}</span><span>win rate ${P.winRate}%</span>
+        ${P.trades ? `<span>best ${sgn(P.best)}%</span><span>worst ${sgn(P.worst)}%</span>` : ''}</div>
+      ${s.demo ? '<div class="rules" style="color:var(--yellow)">Demo coins are made up and pump far more than real ones, so these demo results mean nothing.</div>' : ''}
+      ${P.open.length ? `<ul class="mini">${P.open.map((o) => `<li><span><a href="#" data-open="${o.mint}" style="color:var(--text)">$${esc(o.symbol)}</a> <span class="muted">open ${age(Math.round((Date.now() - o.openedAt) / 1000))}${o.trailing ? ' · trailing' : ''}</span></span><span class="${o.pnlPct >= 0 ? 'up' : 'down'}">${o.pnlPct >= 0 ? '+' : ''}${o.pnlPct.toFixed(1)}%</span></li>`).join('')}</ul>` : '<div class="muted" style="font-size:13px;margin-top:6px">No open positions — waiting for the next alert.</div>'}
+      ${P.recent.length ? `<ul class="mini">${P.recent.slice(0, 5).map((t) => `<li><span>$${esc(t.symbol)} <span class="muted">${esc(t.why)}</span></span><span class="${t.pnlPct >= 0 ? 'up' : 'down'}">${t.pnlPct >= 0 ? '+' : ''}${t.pnlPct.toFixed(1)}%</span></li>`).join('')}</ul>` : ''}
+      <div class="rules">Rules: ${P.rules.sizePct}% per trade · stop −${P.rules.stopPct}% · trailing ${P.rules.trailPct}% after +${P.rules.trailStartPct}% · max ${P.rules.maxHoldMin} min · fees, slippage and price impact included</div>`;
+  }
+
+  // desk: what each part of the bot is doing
+  const pl = s.pipeline || {};
+  const killedPct = pl.scored ? Math.round((pl.filtered / pl.scored) * 100) : 0;
+  const lastOf = (a) => (state.events || []).find((e) => e.agent === a);
+  const lastTxt = (a, fallback) => { const e = lastOf(a); return e ? `$${esc(e.symbol)} ${esc(e.text)}` : fallback; };
+  const desk = [
+    ['🔍', '#1e3a5f', 'Scout', `${pl.launches ?? 0} launches seen`, `${pl.dead ?? 0} died early`],
+    ['🛡', '#4a2d12', 'Filter', lastTxt('FILTER', 'nothing killed yet'), `${pl.filtered ?? 0} killed · ${killedPct}%`],
+    ['🧠', '#2e2456', 'Analyst', lastTxt('ANALYST', 'scoring survivors'), `${pl.scored ?? 0} scored`],
+    ['🔔', '#143d27', 'Alerts', lastTxt('ALERT', 'nothing passed yet'), `${pl.alerts ?? 0} sent`],
+    ['⚡', '#123d38', 'Executor', state.paper ? lastTxt('EXECUTOR', 'paper mode · waiting') : 'off', state.paper ? `${pl.paperTrades ?? 0} paper trades` : ''],
+    ['📉', '#3a1f4a', 'Risk', state.paper ? lastTxt('RISK', 'no open risk') : 'off', state.paper ? `stop −${state.paper.rules.stopPct}%` : ''],
+  ];
+  $('desk-sum').textContent = `${pl.launches ?? 0} scanned · ${pl.alerts ?? 0} alerts`;
+  $('desk').innerHTML = desk.map(([ic, bg, name, txt, n]) => `<li><span class="ic" style="background:${bg}">${ic}</span>
+    <span><b>${name}</b><small>${txt}</small></span><span class="n muted">${n}</span></li>`).join('');
+
+  // why they died
+  const R = state.reasons || [];
+  const maxR = Math.max(1, ...R.map((r) => r[1]));
+  $('why').innerHTML = R.length ? R.map(([k, n]) => `<div><span>${esc(k)}</span><span class="muted">${n}</span><span class="b"><i style="width:${(n / maxR) * 100}%"></i></span></div>`).join('')
+    : '<span class="muted">Nothing rejected yet.</span>';
+
+  // logger
+  const fmtT = (t) => new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  $('logger').innerHTML = (state.events || []).length ? state.events.map((e) => `<li><span class="t">${fmtT(e.at)}</span><span class="a a-${e.agent}">${e.agent}:</span>${e.symbol ? `<a href="#" data-open="${e.mint}" style="color:var(--text)">$${esc(e.symbol)}</a> ` : ''}<span class="l-${e.level}">${esc(e.text)}</span></li>`).join('')
+    : '<li class="muted">Waiting for the first decisions…</li>';
+
   const xp = state.xPosts || [];
   $('xcard').style.display = s.x.on || s.x.radar || xp.length ? '' : 'none';
   $('xposts').innerHTML = xp.length ? xp.map((p) => `<li>
@@ -235,7 +318,13 @@ document.addEventListener('click', (e) => {
   const cp = e.target.closest('[data-copy]');
   if (cp) { e.stopPropagation(); navigator.clipboard?.writeText(cp.dataset.copy); cp.textContent = 'Copied ✓'; setTimeout(() => (cp.textContent = 'Copy CA'), 1200); return; }
   const op = e.target.closest('[data-open]');
-  if (op) { e.preventDefault(); const c = state.coins.find((x) => x.mint === op.dataset.open); if (c) openCoin(c); return; }
+  if (op) {
+    e.preventDefault();
+    const c = state.coins.find((x) => x.mint === op.dataset.open);
+    if (c) openCoin(c);
+    else fetch('/api/coin/' + op.dataset.open).then((r) => r.ok ? r.json() : null).then((c) => { if (c?.safety) openCoin(c); });
+    return;
+  }
   const row = e.target.closest('tr.row');
   if (row) { const c = state.coins.find((x) => x.mint === row.dataset.mint); if (c) openCoin(c); }
 });

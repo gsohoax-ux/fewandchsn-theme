@@ -35,6 +35,42 @@ MC $9.8k · Curve 24% · Age 1m 40s · 61 holders
 | **Momentum** | Curve speed (%/min), unique buyers, buy/sell volume, net SOL inflow, wash-trading, drawdown from the high, and optional "smart wallets" you list. |
 | **Bot-farm filter** | Tiny "dust" buys under 0.02 SOL don't count as buyers, and only wallets holding 0.01%+ count as holders. Several identical-size buys in the first 5 seconds are flagged as a scripted bundle. |
 | **Dex paid** | Free DexScreener check: did the dev pay for a DexScreener profile? |
+| **Dev rugged before** | The bot remembers how each dev's earlier coins ended. A dev whose past coin pumped and then crashed gets ⛔. A dev with graduated coins gets ✅. Only coins seen while the bot was running count. |
+
+### 📄 Paper trading (fake money, free)
+
+The bot "buys" every alert with a fake balance and manages each position with risk rules, so you
+can see in dollars whether following the alerts would make money. **Nothing touches a wallet.**
+
+- Fills are deliberately **pessimistic**: real bonding-curve price impact, the Pump.fun fee on every
+  buy and sell, a network fee per transaction, and extra slippage for being slower than snipers.
+  A position starts about 8–12% down the moment it's bought, which is roughly what really happens.
+- Rules (change them in Railway Variables):
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `PAPER_START_SOL` | 2 | Starting fake balance. Changing it starts a fresh account. |
+| `PAPER_SIZE_PCT` | 8 | % of the balance per trade |
+| `PAPER_MAX_OPEN` | 5 | Max positions at once |
+| `PAPER_STOP_PCT` | 25 | Sell if down this much |
+| `PAPER_TRAIL_START_PCT` / `PAPER_TRAIL_PCT` | 30 / 20 | After +30%, sell when it drops 20% from its best |
+| `PAPER_MAX_HOLD_MIN` | 90 | Sell after this many minutes regardless |
+| `PAPER_FEE_PCT`, `PAPER_TX_FEE_SOL`, `PAPER_SLIPPAGE_PCT` | 1.25, 0.002, 3 | Costs |
+| `PAPER` | 1 | 0 turns paper trading off |
+
+A −6% stop like some bots advertise would trigger almost immediately, because fees and slippage alone
+cost about that much. That's why the default stop is wider.
+
+**Real auto-trading is not built yet, on purpose.** It only makes sense after paper trading has been
+profitable over a good number of trades. It also means giving the bot a wallet key, so it needs
+extra safety work first.
+
+### 📜 Desk, Logger and "Why they died"
+
+The dashboard shows each part of the bot (Scout, Filter, Analyst, Alerts, Executor, Risk) with
+what it last did, a live **Logger** of every decision and its reason, a **Why they died** chart of
+rejection reasons, and a **ticker** of the biggest movers in the last 5 minutes. AVOID coins are
+left out of the ticker.
 
 ### 🧠 Self-learning (free)
 

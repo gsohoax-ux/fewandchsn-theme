@@ -11,8 +11,8 @@ import { dexPaid } from './dexscreener.js';
 const MAX_PARALLEL_EVALS = 4;
 
 export class Engine {
-  constructor({ cfg, feed, chain, store, notifier, ai, xwatch = null, learner = null, log = console }) {
-    Object.assign(this, { cfg, feed, chain, store, notifier, ai, xwatch, learner, log });
+  constructor({ cfg, feed, chain, store, notifier, ai, xwatch = null, learner = null, paper = null, log = console }) {
+    Object.assign(this, { cfg, feed, chain, store, notifier, ai, xwatch, learner, paper, log });
     this.coins = new Map();
     this.trends = new TrendTracker();
     this.running = 0;
@@ -22,6 +22,9 @@ export class Engine {
     this.counters = { launches: 0, evaluated: 0, alerts: 0, dropped: 0 };
     this.feedConnected = false;
     this.radar = new Map(); // tweet id -> { author, mints: Map(mint -> ts) }
+    this.events = [];        // live log: what each part of the bot decided, and why
+    this.kills = new Map();  // rejection reason -> number of coins
+    this.pipeline = { scored: 0, filtered: 0, lowScore: 0, dead: 0 };
     this.xwatch?.on('posts', () => this.#rematchAll());
   }
 
@@ -85,6 +88,23 @@ export class Engine {
     }).catch(() => { coin.meta = coin.meta ?? {}; });
   }
 
+  logEvent(agent, coin, text, level = '') {
+    this.events.push({ at: Date.now(), agent, symbol: coin?.symbol ?? '', mint: coin?.mint ?? '', text, level });
+    if (this.events.length > 300) this.events.splice(0, this.events.length - 300);
+  }
+
+  #kill(reason) { this.kills.set(reason, (this.kills.get(reason) ?? 0) + 1); }
+
+  /** Biggest market-cap moves in the last 5 minutes among coins that are not AVOID. */
+  movers(limit = 8, now = Date.now()) {
+    return [...this.coins.values()]
+      .filter((c) => c.result && c.result.safety.verdict !== 'AVOID' && !c.migrated)
+      .map((c) => ({ c, ch: c.mcSol / Math.max(1e-9, c.mcAt(now - 5 * 60_000)) - 1 }))
+      .filter((x) => x.ch > 0.05)
+      .sort((a, b) => b.ch - a.ch).slice(0, limit)
+      .map(({ c, ch }) => ({ mint: c.mint, symbol: c.symbol, mcSol: c.mcSol, changePct: ch * 100, score: c.result.score }));
+  }
+
   #xMatch(coin) {
     if (!this.xwatch?.posts.size || !coin.meta) return null;
     const m = this.xwatch.match(coin);
@@ -107,6 +127,7 @@ export class Engine {
     const coins = [...r.mints.keys()].map((m) => this.coins.get(m)).filter(Boolean);
     if (coins.length < this.cfg.radarMinCoins) return;
     if (!this.xwatch.addRadarPost({ id, author: r.author, coins, now })) this.#rematchAll();
+    else this.logEvent('RADAR', coin, `${coins.length} coins launched on @${r.author ?? '?'}'s X post`);
   }
 
   #rematchAll() { for (const c of this.coins.values()) c.xMatch = this.#xMatch(c); }
@@ -131,6 +152,7 @@ export class Engine {
     const wasDevSold = coin.devSold;
     coin.applyTrade(msg);
     for (const s of coin.samples.values()) if (!s.done) s.peak = Math.max(s.peak, coin.mcSol);
+    if (this.paper?.positions.has(coin.mint)) this.paper.onPrice(coin, this.coins);
     if (coin.progress >= 30) this.trends.recordRunner(coin);
     if (!coin.alert) return;
     if (!wasDevSold && coin.devSold) this.#warn(coin, 'dev-sell', 'Dev started selling');
@@ -159,6 +181,7 @@ export class Engine {
     if (coin.warningsSent.has(key)) return;
     coin.warningsSent.add(key);
     coin.result?.events?.push({ at: Date.now(), text });
+    this.logEvent('WATCH', coin, text, key === 'migrated' ? 'good' : 'bad');
     this.notifier.warn(coin, text);
   }
 
@@ -183,6 +206,11 @@ export class Engine {
 
   #drop(coin) {
     this.#flushSamples(coin, Date.now(), true);
+    // Remember how this coin ended, for "dev rugged before" on the dev's next coins
+    const ath = coin.athMcSol, start = coin.startMcSol || coin.mcSol;
+    const rugged = ath >= start * 1.3 && coin.mcSol <= ath * 0.35 && !coin.migrated;
+    try { this.store.setOutcome(coin.mint, ath, coin.mcSol, rugged, coin.migrated); } catch { /* not critical */ }
+    if (!coin.result) { this.pipeline.dead++; this.#kill('No traction (died early)'); }
     if (coin.alert) this.store.updatePeak(coin.mint, coin.peakMcSinceAlert, coin.migrated);
     this.feed.unwatch(coin.mint);
     this.coins.delete(coin.mint);
@@ -191,6 +219,7 @@ export class Engine {
 
   tick(now = Date.now()) {
     const cfg = this.cfg;
+    this.paper?.tick(this.coins, now);
     const flush = now - (this.lastFlush ?? 0) > 60_000;
     if (flush) this.lastFlush = now;
     for (const coin of this.coins.values()) {
@@ -246,6 +275,7 @@ export class Engine {
     const safety = analyzeSafety(coin, chainData, {
       cfg, recycledSocials,
       devLaunches24h: this.store.devLaunches(coin.creator, now - 86400_000),
+      devHistory: this.store.devHistory(coin.creator, coin.mint),
     });
 
     const momentum = analyzeMomentum(coin, now, cfg.smartWallets);
@@ -304,6 +334,20 @@ export class Engine {
     coin.result = { at: now, stage, score, light, safety, momentum, narrative, confidence, x, learned, dexPaid: paid, insiderWallets,
       insiderHeldAtEval, events: coin.result?.events ?? [] };
     this.counters.evaluated++;
+    if (!coin.counted) {
+      coin.counted = true;
+      this.pipeline.scored++;
+      if (safety.verdict === 'AVOID') {
+        this.pipeline.filtered++;
+        const bad = safety.flags.filter((f) => f.level === 'bad');
+        for (const f of bad) this.#kill(f.cat || 'Other red flag');
+        this.logEvent('FILTER', coin, `killed · ${bad[0]?.text ?? 'red flags'}`, 'bad');
+      } else if (score < cfg.alertMinScore) {
+        this.pipeline.lowScore++;
+        this.#kill(`Score below ${cfg.alertMinScore}`);
+        this.logEvent('ANALYST', coin, `passed on · score ${score} < ${cfg.alertMinScore}`, 'muted');
+      }
+    }
 
     // X narrative alert: about a meme-able post, leading coin on it, rising, and SAFE
     const rising = momentum.score >= cfg.xMinMomentum && momentum.progressPerMin > 0 && momentum.buySellRatio >= 1.2;
@@ -328,6 +372,8 @@ export class Engine {
     this.store.addAlert(coin, stage, coin.result);
     this.counters.alerts++;
     this.log.info(`ALERT ${light} $${coin.symbol} ${score}/100 [${stage}] conf ${coin.result.confidence.label} ${coin.mint}`);
+    this.logEvent('ALERT', coin, `score ${score} · ${stage === 'x' ? 'X narrative' : stage} · ${coin.result.confidence.label} confidence`, 'good');
+    this.paper?.open(coin, { stage, score }, this.coins, now);
     await this.notifier.alert(coin, coin.result, stage);
   }
 
@@ -393,6 +439,8 @@ export class Engine {
         : { on: false, radar: Boolean(this.xwatch), posts: this.xwatch?.posts.size ?? 0 },
       hotThemes: this.trends.hotThemes(), alertMinScore: this.cfg.alertMinScore,
       learning: this.learner?.status() ?? null,
+      pipeline: { launches: this.counters.launches, ...this.pipeline, alerts: this.counters.alerts,
+        paperTrades: this.paper ? this.store.paperTradesSince(0).length + this.paper.positions.size : 0 },
     };
   }
 }

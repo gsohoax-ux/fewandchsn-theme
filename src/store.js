@@ -25,10 +25,18 @@ export class Store {
         migrated INTEGER DEFAULT 0, done INTEGER DEFAULT 0, PRIMARY KEY (mint, stage));
       CREATE INDEX IF NOT EXISTS samples_done ON samples(done, at);
       CREATE TABLE IF NOT EXISTS kv (k TEXT PRIMARY KEY, v TEXT);
+      CREATE TABLE IF NOT EXISTS paper_trades (
+        mint TEXT, symbol TEXT, opened_at INTEGER, closed_at INTEGER, cost_sol REAL, proceeds_sol REAL,
+        why TEXT, stage TEXT, score INTEGER, entry_mc REAL, exit_mc REAL);
     `);
+    // Older databases: add the launch-outcome columns used for "dev rugged before"
+    const cols = new Set(this.db.prepare('PRAGMA table_info(launches)').all().map((c) => c.name));
+    for (const [c, t] of [['ath_mc', 'REAL'], ['final_mc', 'REAL'], ['rugged', 'INTEGER'], ['graduated', 'INTEGER']]) {
+      if (!cols.has(c)) this.db.exec(`ALTER TABLE launches ADD COLUMN ${c} ${t}`);
+    }
     const q = (sql) => this.db.prepare(sql);
     this.s = {
-      addLaunch: q(`INSERT OR IGNORE INTO launches VALUES (?,?,?,?,?,?,?)`),
+      addLaunch: q(`INSERT OR IGNORE INTO launches (mint, creator, symbol, name, social_key, tweet_key, created_at) VALUES (?,?,?,?,?,?,?)`),
       setSocial: q(`UPDATE launches SET social_key = ?, tweet_key = ? WHERE mint = ?`),
       devCount: q(`SELECT COUNT(*) n FROM launches WHERE creator = ? AND created_at >= ?`),
       socialReuse: q(`SELECT mint FROM launches WHERE social_key = ? AND mint != ? LIMIT 20`),
@@ -45,6 +53,12 @@ export class Store {
       finalize: q(`UPDATE samples SET done = 1 WHERE done = 0 AND at < ?`),
       sampleCounts: q(`SELECT SUM(done) done, COUNT(*) total FROM samples`),
       pruneSamples: q(`DELETE FROM samples WHERE at < ?`),
+      setOutcome: q(`UPDATE launches SET ath_mc = ?, final_mc = ?, rugged = ?, graduated = ? WHERE mint = ?`),
+      devHistory: q(`SELECT COUNT(*) finished, SUM(rugged) rugged, SUM(graduated) migrated FROM launches
+                     WHERE creator = ? AND mint != ? AND rugged IS NOT NULL`),
+      addPaper: q(`INSERT INTO paper_trades VALUES (?,?,?,?,?,?,?,?,?,?,?)`),
+      paperTrades: q(`SELECT * FROM paper_trades ORDER BY closed_at DESC LIMIT ?`),
+      paperSince: q(`SELECT * FROM paper_trades WHERE closed_at >= ?`),
       getKv: q(`SELECT v FROM kv WHERE k = ?`),
       setKv: q(`INSERT OR REPLACE INTO kv VALUES (?, ?)`),
       similar: q(`SELECT COUNT(*) n, SUM(CASE WHEN peak_mc_sol >= 1.5 * mc_sol THEN 1 ELSE 0 END) hits
@@ -87,6 +101,22 @@ export class Store {
     const r = this.s.similar.get(score - 5, score + 5, now - 14 * 86400_000, now - 3600_000);
     return { n: r.n ?? 0, hits: r.hits ?? 0 };
   }
+
+  // ---- launch outcomes (for "dev rugged before") ----
+  setOutcome(mint, athMc, finalMc, rugged, graduated) { this.s.setOutcome.run(athMc, finalMc, rugged ? 1 : 0, graduated ? 1 : 0, mint); }
+  devHistory(creator, mint) {
+    const r = this.s.devHistory.get(creator ?? '', mint);
+    return { finished: r.finished ?? 0, rugged: r.rugged ?? 0, migrated: r.migrated ?? 0 };
+  }
+
+  // ---- paper trading ----
+  addPaperTrade(t) {
+    this.s.addPaper.run(t.mint, t.symbol, t.openedAt, t.closedAt, t.costSol, t.proceedsSol, t.why, t.stage, t.score, t.entryMc, t.exitMc);
+  }
+  paperTrades(limit = 50) { return this.s.paperTrades.all(limit); }
+  paperTradesSince(ms) { return this.s.paperSince.all(ms); }
+  getKv(k) { try { return JSON.parse(this.s.getKv.get(k)?.v ?? 'null'); } catch { return null; } }
+  setKv(k, v) { this.s.setKv.run(k, JSON.stringify(v)); }
 
   // ---- learning data ----
   addSample(mint, stage, at, features, mcSol) { this.s.addSample.run(mint, stage, at, JSON.stringify(features), mcSol, mcSol); }
