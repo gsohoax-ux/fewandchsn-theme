@@ -10,6 +10,7 @@ import { Engine } from './engine.js';
 import { startServer } from './server.js';
 import { fmtMc } from './score.js';
 import { XWatcher, XApiSource, DemoXSource } from './xwatch.js';
+import { Learner } from './learn.js';
 
 const ts = () => new Date().toISOString().slice(11, 19);
 const log = {
@@ -29,7 +30,8 @@ const ntfy = new Ntfy({ server: cfg.ntfyServer, topic: resolveNtfyTopic(cfg, log
 const notifier = new Notifier({ ntfy, telegram, cfg, getSolUsd: () => engine.solUsd });
 if (cfg.demo) cfg.xPollSec = 15;
 const xwatch = new XWatcher({ source: xSource, ai, cfg, notifier, log });
-const engine = new Engine({ cfg, feed, chain, store, notifier, ai, xwatch, log });
+const learner = new Learner({ store, cfg, log });
+const engine = new Engine({ cfg, feed, chain, store, notifier, ai, xwatch, learner, log });
 
 // Telegram commands (only used if you set up Telegram too)
 telegram.on('help', async () => [

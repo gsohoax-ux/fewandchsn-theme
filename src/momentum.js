@@ -6,7 +6,11 @@ const sat = (x, half) => x <= 0 ? 0 : x / (x + half); // 0..1, = 0.5 at x = half
 export function analyzeMomentum(coin, now = Date.now(), smartWallets = new Set()) {
   const w2 = now - 120_000;
   const recent = coin.trades.filter((t) => t.ts >= w2);
-  const buys = recent.filter((t) => t.side === 'buy');
+  const DUST_SOL = 0.02;
+  const allBuys = recent.filter((t) => t.side === 'buy');
+  // Tiny "dust" buys are usually bots inflating the buyer count - ignore them
+  const buys = allBuys.filter((t) => t.sol >= DUST_SOL);
+  const dustPct = allBuys.length ? ((allBuys.length - buys.length) / allBuys.length) * 100 : 0;
   const sells = recent.filter((t) => t.side === 'sell');
   const buySol = buys.reduce((s, t) => s + t.sol, 0);
   const sellSol = sells.reduce((s, t) => s + t.sol, 0);
@@ -28,6 +32,9 @@ export function analyzeMomentum(coin, now = Date.now(), smartWallets = new Set()
   const roundTripVol = [...traders.values()].filter((e) => e.b && e.s).reduce((s, e) => s + e.vol, 0);
   const washPct = totalVol ? (roundTripVol / totalVol) * 100 : 0;
 
+  // Real holders: at least 0.01% of supply (100k tokens), not dust wallets
+  const realHolders = [...coin.balances.values()].filter((b) => b >= 100_000).length;
+
   const smartHolders = [...smartWallets].filter((w) => (coin.balances.get(w) ?? 0) > 1);
 
   // Drawdown from the top - a coin 60% off its high is not "going up"
@@ -38,15 +45,16 @@ export function analyzeMomentum(coin, now = Date.now(), smartWallets = new Set()
     25 * sat(uniqueBuyers2m, 25) +       // lots of distinct buyers
     20 * clamp((ratio - 0.8) / 2.2, 0, 1) + // more buying than selling
     10 * sat(buySol - sellSol, 8) +      // net inflow in SOL
-    10 * sat(coin.holders().length, 120); // holder base
+    10 * sat(realHolders, 120);           // real holder base
   score += Math.min(15, smartHolders.length * 7);
   score -= Math.max(0, washPct - 30) * 0.5;
   score -= Math.max(0, drawdownPct - 25) * 0.6;
+  score -= Math.max(0, dustPct - 40) * 0.4;
 
   return {
     score: Math.round(clamp(score)),
     progressPerMin, uniqueBuyers2m, buySellRatio: ratio, netInflowSol: buySol - sellSol,
-    buys2m: buys.length, sells2m: sells.length, washPct, drawdownPct,
-    holders: coin.holders().length, smartHolders,
+    buys2m: buys.length, sells2m: sells.length, washPct, drawdownPct, dustPct,
+    holders: realHolders, smartHolders,
   };
 }

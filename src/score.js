@@ -1,7 +1,9 @@
 // Combine safety, narrative and momentum into one score + Telegram/dashboard text.
 
-export function combine(safety, narrative, momentum) {
+export function combine(safety, narrative, momentum, learnedPct = null, blend = 0.5) {
   let score = 0.35 * narrative.score + 0.35 * momentum.score + 0.30 * safety.score;
+  // Once the bot has learned (and proven) what works, mix in its learned ranking
+  if (learnedPct != null) score = (1 - blend) * score + blend * learnedPct;
   if (safety.verdict === 'AVOID') score = Math.min(score, 30);
   else if (safety.verdict === 'CAUTION') score -= 5;
   score = Math.round(Math.max(0, Math.min(100, score)));
@@ -31,6 +33,12 @@ function confLine(r) {
   return c ? `🎯 Confidence ${c.label} ${c.meter} (${c.value})${c.track ? ` · similar past alerts hit 1.5x ${c.track.hitPct}% of the time` : ''}` : '';
 }
 
+function learnedLine(r) {
+  const l = r.learned;
+  if (!l?.validated) return '';
+  return `📊 Learned: ${Math.round(l.p * 100)}% chance of ${l.target}x (average coin ${Math.round(l.baseRate * 100)}%) · from ${l.n} past coins`;
+}
+
 function xLines(r) {
   const x = r.x;
   if (!x) return [];
@@ -51,6 +59,7 @@ export function formatAlert(coin, r, stage, { solUsd, padreTemplate } = {}) {
     `<code>${coin.mint}</code>`,
     `MC ${fmtMc(coin.mcSol, solUsd)} · Curve ${coin.progress.toFixed(0)}% · Age ${fmtAge(coin.ageSec())} · ${m.holders} holders`,
     esc(confLine(r)),
+    esc(learnedLine(r)),
     ...xLines(r).map(esc),
     ...(r.x ? [`<a href="${r.x.url}">Open the X post</a>`] : []),
     '',
@@ -76,6 +85,7 @@ export function alertNotification(coin, r, stage, { solUsd, padreTemplate, dashb
   const message = [
     `${coin.name} · MC ${fmtMc(coin.mcSol, solUsd)} · Curve ${coin.progress.toFixed(0)}% · ${fmtAge(coin.ageSec())} · ${m.holders} holders`,
     confLine(r),
+    learnedLine(r),
     ...xLines(r),
     `🧠 Narrative ${n.score}${n.theme ? ` — ${n.theme}` : ''}${n.summary ? `: ${n.summary}` : ''}`,
     `📈 Momentum ${m.score} — curve ${m.progressPerMin >= 0 ? '+' : ''}${m.progressPerMin.toFixed(1)}%/min, buy/sell ${m.buySellRatio.toFixed(1)}x, ${m.uniqueBuyers2m} buyers in 2m`,

@@ -69,6 +69,10 @@
   .posts .tags span { background: var(--panel2); border: 1px solid var(--line); border-radius: 99px; padding: 1px 8px; }
   .posts .coins { margin-top: 6px; font-size: 12px; }
   .posts a { color: var(--blue); text-decoration: none; }
+  .learn { padding: 12px 14px; font-size: 13px; }
+  .learn .bar { width: 100%; margin: 8px 0 4px; }
+  .learn ul { list-style: none; padding: 0; margin: 8px 0 0; }
+  .learn li { padding: 2px 0; }
   .disclaimer { color: var(--muted); font-size: 12px; padding: 0 20px 20px; text-align: center; }
   @media (max-width: 700px) { .hide-sm { display: none; } td, th { padding: 8px 6px; } }
 </style>
@@ -96,6 +100,7 @@
   </section>
   <aside class="side">
     <div class="card" id="xcard"><h2><span>🐦 Posts on X to watch</span><span class="muted">meme-able</span></h2><ul class="posts" id="xposts"></ul></div>
+    <div class="card"><h2>🧠 What the bot has learned</h2><div class="learn" id="learn"></div></div>
     <div class="card"><h2>Narratives running now</h2><div class="themes" id="themes"></div></div>
     <div class="card"><h2><span>Recent alerts</span><span class="muted">peak after alert</span></h2><ul class="alerts" id="alerts"></ul></div>
   </aside>
@@ -129,7 +134,16 @@ function render() {
   $('stats').innerHTML = [
     ['Tracking', s.tracked], ['Launches seen', s.launches], ['Scored', s.evaluated], ['Alerts (7d)', st.alerts],
     ['Hit 2x after alert', `${st.hit2x}%`], ['Graduated', `${st.migrated}%`],
+    ['Learning', s.learning ? (s.learning.validated ? `On · ${s.learning.lift}x` : `${s.learning.samples.done} coins`) : 'off'],
   ].map(([k, v]) => `<div class="stat"><b>${v}</b><small>${k}</small></div>`).join('');
+  const L = s.learning;
+  $('learn').innerHTML = !L ? '<span class="muted">Off</span>' : `
+    <div>${esc(L.info)}</div>
+    ${!L.n ? `<span class="bar"><i style="width:${Math.min(100, (L.samples.done / 300) * 100).toFixed(0)}%"></i></span>
+      <div class="muted" style="font-size:12px">${L.samples.done} coins with a finished 2-hour result · ${L.samples.total} recorded. Learning starts at 300.</div>` : ''}
+    ${L.n ? `<div class="muted" style="font-size:12px;margin-top:6px">Average coin hit ${L.target}x: ${Math.round(L.baseRate * 100)}% · bot's top picks (tested on newest coins): ${Math.round(L.testTop * 100)}%</div>` : ''}
+    ${L.top.length ? `<ul>${L.top.map((f) => `<li class="up">▲ ${esc(f.label)}</li>`).join('')}${L.bottom.map((f) => `<li class="down">▼ ${esc(f.label)}</li>`).join('')}</ul>
+      <div class="muted" style="font-size:11px;margin-top:4px">▲ = more of this, more pumps · ▼ = more of this, fewer pumps</div>` : ''}`;
   $('themes').innerHTML = s.hotThemes.length ? s.hotThemes.map((t) => `<span class="chip">${esc(t.word)} · ${t.count}</span>`).join('')
     : '<span class="muted">Learning from coins that pump…</span>';
   const xp = state.xPosts || [];
@@ -177,6 +191,8 @@ function openCoin(c) {
       <span class="muted">${c.x.origin === 'radar' ? `📡 ${c.x.radarCoins} coins launched on it` : `❤️ ${c.x.likes.toLocaleString()}`} · viral ${c.x.viral} · meme ${c.x.meme} · coin ${esc(c.x.how)} · ${c.x.coinsOnPost > 1 ? `#${c.x.rank} of ${c.x.coinsOnPost} coins on this post` : 'only coin on this post'}</span></p>` : ''}
     <h3>🛡 Safety — <span class="v-${sf.verdict}">${sf.verdict}</span> (${sf.score})</h3>
     <ul class="flags">${sf.flags.map((f) => `<li>${ICON[f.level]} ${esc(f.text)}</li>`).join('')}</ul>
+    ${c.learned?.validated ? `<h3>📊 Learned chance</h3><p><b>${Math.round(c.learned.p * 100)}%</b> chance of ${c.learned.target}x <span class="muted">(average coin ${Math.round(c.learned.baseRate * 100)}% · learned from ${c.learned.n} past coins)</span></p>` : ''}
+    ${c.dexPaid ? '<p>💰 <b>Dex paid</b> — the dev paid for a DexScreener profile</p>' : ''}
     <h3>🧠 Narrative — ${n.score} <span class="muted">(${n.source === 'ai' ? 'AI' : 'rules'})</span></h3>
     <p>${n.theme ? `<b>${esc(n.theme)}</b> · ` : ''}${n.freshness && n.freshness !== 'unknown' ? esc(n.freshness.replace('_', ' ')) + '<br>' : ''}${esc(n.summary)}</p>
     ${(n.redFlags || []).map((f) => `<div>⚠️ ${esc(f)}</div>`).join('')}

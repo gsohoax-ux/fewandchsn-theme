@@ -95,6 +95,17 @@ export function findClusters(coin, wallets, services = new Set()) {
     .sort((a, b) => b.heldPct - a.heldPct);
 }
 
+/** Size of the biggest group of amounts within 2% of each other (round numbers excluded). */
+export function largestSameSizeGroup(amounts) {
+  const xs = amounts.filter((a) => Math.abs(a * 10 - Math.round(a * 10)) > 1e-6).sort((a, b) => a - b);
+  let best = 0;
+  for (let i = 0, j = 0; i < xs.length; i++) {
+    while (xs[i] > xs[j] * 1.02) j++;
+    best = Math.max(best, i - j + 1);
+  }
+  return best;
+}
+
 /**
  * Pure scoring of safety. ctx: { devLaunches24h, recycledSocials, smartWallets, cfg }
  */
@@ -137,6 +148,12 @@ export function analyzeSafety(coin, chainData, ctx) {
     else add('ok', `Fresh wallets among early buyers: ${fresh.length}/${checked.length}`);
   }
 
+  // 3b. Identical-size buys right after launch: a script buying from many wallets
+  const early5s = coin.trades.filter((t) => t.side === 'buy' && t.trader !== coin.creator && t.ts - coin.createdAt <= 5000 && t.sol >= 0.05);
+  const sameSize = largestSameSizeGroup(early5s.map((t) => t.sol));
+  if (sameSize >= 4) add('bad', `${sameSize} identical-size buys in the first 5s (scripted bundle)`);
+  else if (sameSize === 3) add('warn', '3 identical-size buys in the first 5s');
+
   // 4. Dev
   const devPct = coin.devPct();
   if (coin.devSold && coin.devSoldPct >= 90) add('info', 'Dev sold out');
@@ -162,6 +179,6 @@ export function analyzeSafety(coin, chainData, ctx) {
     verdict, score, flags, source: chainData.source,
     launchBundle: { wallets: launch.size, initialPct: launchInitial, heldPct: launchHeld },
     clusters: clusters.map((c) => ({ size: c.wallets.length, heldPct: c.heldPct, includesDev: c.includesDev, funder: c.funder })),
-    devPct, top10Pct: top10, freshPct, errors: chainData.errors,
+    devPct, top10Pct: top10, freshPct, sameSizeBuys: sameSize, errors: chainData.errors,
   };
 }

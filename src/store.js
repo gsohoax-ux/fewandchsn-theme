@@ -20,6 +20,11 @@ export class Store {
         mint TEXT, stage TEXT, symbol TEXT, name TEXT, at INTEGER, score INTEGER,
         safety TEXT, narrative INTEGER, momentum INTEGER, mc_sol REAL,
         peak_mc_sol REAL, migrated INTEGER DEFAULT 0, PRIMARY KEY (mint, stage));
+      CREATE TABLE IF NOT EXISTS samples (
+        mint TEXT, stage TEXT, at INTEGER, features TEXT, mc_sol REAL, peak_mc_sol REAL,
+        migrated INTEGER DEFAULT 0, done INTEGER DEFAULT 0, PRIMARY KEY (mint, stage));
+      CREATE INDEX IF NOT EXISTS samples_done ON samples(done, at);
+      CREATE TABLE IF NOT EXISTS kv (k TEXT PRIMARY KEY, v TEXT);
     `);
     const q = (sql) => this.db.prepare(sql);
     this.s = {
@@ -33,6 +38,15 @@ export class Store {
       recentAlerts: q(`SELECT * FROM alerts ORDER BY at DESC LIMIT ?`),
       since: q(`SELECT * FROM alerts WHERE at >= ?`),
       prune: q(`DELETE FROM launches WHERE created_at < ?`),
+      addSample: q(`INSERT OR IGNORE INTO samples VALUES (?,?,?,?,?,?,0,0)`),
+      updSample: q(`UPDATE samples SET peak_mc_sol = MAX(peak_mc_sol, ?), migrated = MAX(migrated, ?), done = MAX(done, ?)
+                    WHERE mint = ? AND stage = ?`),
+      doneSamples: q(`SELECT * FROM samples WHERE done = 1 ORDER BY at DESC LIMIT ?`),
+      finalize: q(`UPDATE samples SET done = 1 WHERE done = 0 AND at < ?`),
+      sampleCounts: q(`SELECT SUM(done) done, COUNT(*) total FROM samples`),
+      pruneSamples: q(`DELETE FROM samples WHERE at < ?`),
+      getKv: q(`SELECT v FROM kv WHERE k = ?`),
+      setKv: q(`INSERT OR REPLACE INTO kv VALUES (?, ?)`),
       similar: q(`SELECT COUNT(*) n, SUM(CASE WHEN peak_mc_sol >= 1.5 * mc_sol THEN 1 ELSE 0 END) hits
                   FROM alerts WHERE score BETWEEN ? AND ? AND at BETWEEN ? AND ?`),
     };
@@ -74,5 +88,18 @@ export class Store {
     return { n: r.n ?? 0, hits: r.hits ?? 0 };
   }
 
-  pruneOld(days = 14) { this.s.prune.run(Date.now() - days * 86400_000); }
+  // ---- learning data ----
+  addSample(mint, stage, at, features, mcSol) { this.s.addSample.run(mint, stage, at, JSON.stringify(features), mcSol, mcSol); }
+  updateSample(mint, stage, peakMcSol, migrated, done) { this.s.updSample.run(peakMcSol, migrated ? 1 : 0, done ? 1 : 0, mint, stage); }
+  doneSamples(limit = 20000) { return this.s.doneSamples.all(limit); }
+  /** Samples whose outcome window has passed (e.g. lost in a restart) count as finished. */
+  finalizeStale(beforeMs) { this.s.finalize.run(beforeMs); }
+  sampleCounts() { const r = this.s.sampleCounts.get(); return { done: r.done ?? 0, total: r.total ?? 0 }; }
+  getModel() { try { return JSON.parse(this.s.getKv.get('model')?.v ?? 'null'); } catch { return null; } }
+  saveModel(m) { this.s.setKv.run('model', JSON.stringify(m)); }
+
+  pruneOld(days = 14) {
+    this.s.prune.run(Date.now() - days * 86400_000);
+    this.s.pruneSamples.run(Date.now() - 60 * 86400_000);
+  }
 }

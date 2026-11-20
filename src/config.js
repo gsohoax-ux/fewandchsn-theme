@@ -56,6 +56,18 @@ export const config = {
   radarWindowMin: num('RADAR_WINDOW_MIN', 60),
   radarAlerts: env('RADAR_ALERTS', '1') === '1',
 
+  // Self-learning
+  learnTarget: num('LEARN_TARGET', 1.5),             // "a hit" = coin reached this multiple after scoring
+  learnHorizonMin: num('LEARN_HORIZON_MIN', 120),    // how long after scoring we watch the outcome
+  learnMinSamples: num('LEARN_MIN_SAMPLES', 300),    // finished coins needed before learning
+  learnMinLift: num('LEARN_MIN_LIFT', 1.3),          // learned model must beat average by this much
+  learnEveryMin: num('LEARN_EVERY_MIN', 30),
+  learnMaxSamples: num('LEARN_MAX_SAMPLES', 20000),
+  learnBlend: num('LEARN_BLEND', 0.5),               // weight of the learned score once validated
+
+  // Free DexScreener check (did the dev pay for a DexScreener profile/boost?)
+  dexCheck: env('DEX_CHECK', '1') === '1',
+
   // Dashboard
   port: num('PORT', 8080),
   dashboardPassword: env('DASHBOARD_PASSWORD'),

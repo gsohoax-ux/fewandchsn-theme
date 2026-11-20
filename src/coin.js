@@ -59,6 +59,7 @@ export class Coin {
     this.alert = null;             // {stage, at, mcSol, score}
     this.peakMcSinceAlert = 0;
     this.warningsSent = new Set();
+    this.samples = new Map();      // stage -> { at, mc, peak, done } for self-learning
   }
 
   applyTrade(msg, now = Date.now()) {

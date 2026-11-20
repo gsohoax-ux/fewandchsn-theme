@@ -33,6 +33,24 @@ MC $9.8k · Curve 24% · Age 1m 40s · 61 holders
 | **Recycled socials** | The same X or Telegram link already used by another coin. |
 | **Narrative** | AI reads name, ticker, description and socials, and compares them with **what's actually pumping right now**. The bot learns the current meta from coins that reach 30%+ of the curve. It also flags copycats (same ticker) and "tweet coins". |
 | **Momentum** | Curve speed (%/min), unique buyers, buy/sell volume, net SOL inflow, wash-trading, drawdown from the high, and optional "smart wallets" you list. |
+| **Bot-farm filter** | Tiny "dust" buys under 0.02 SOL don't count as buyers, and only wallets holding 0.01%+ count as holders. Several identical-size buys in the first 5 seconds are flagged as a scripted bundle. |
+| **Dex paid** | Free DexScreener check: did the dev pay for a DexScreener profile? |
+
+### 🧠 Self-learning (free)
+
+The bot records **every coin it scores** and what happened over the next **2 hours**: how high it
+went, and whether it graduated. Once it has **300 finished coins**, it learns which signals actually
+came before pumps, and retrains every 30 minutes as data grows.
+
+- It's **tested before it's trusted**. The bot trains on older coins and checks itself on the newest
+  ones it hasn't seen. Only if its top picks hit 1.5x at least **1.3x more often than average** does
+  it start mixing its learned ranking into the score, at 50/50. Otherwise the default scores stay.
+- Each coin then shows a real **"📊 chance of 1.5x"**, compared with the average coin.
+- The dashboard panel **"What the bot has learned"** shows which signals help (▲) and which hurt (▼).
+
+**The Railway volume (`/app/data`) is required for learning.** Without it, the history is wiped
+every time the bot restarts or updates. Settings: `LEARN_TARGET` (1.5), `LEARN_HORIZON_MIN` (120),
+`LEARN_MIN_SAMPLES` (300), `LEARN_MIN_LIFT` (1.3), `LEARN_BLEND` (0.5).
 
 ### 🎯 Confidence meter
 
