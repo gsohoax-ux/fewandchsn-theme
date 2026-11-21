@@ -120,7 +120,7 @@ export class Store {
 
   // ---- paper trading ----
   addPaperTrade(t) {
-    this.s.addPaper.run(t.mint, t.symbol, t.openedAt, t.closedAt, t.costSol, t.proceedsSol, t.why, t.stage, t.score, t.entryMc, t.exitMc,
+    this.s.addPaper.run(t.mint, t.symbol, t.openedAt, t.closedAt, t.costSol, t.proceedsSol, t.why, t.stage ?? null, t.score ?? null, t.entryMc ?? null, t.exitMc ?? null,
       t.entryProgress ?? null, t.mfe ?? null, t.mae ?? null, t.hurdle ?? null, t.regime ?? null, t.deployTool ?? null, t.vamp ?? 0);
   }
   paperTrades(limit = 50) { return this.s.paperTrades.all(limit); }

@@ -114,6 +114,8 @@
   .col li:hover { background: var(--panel2); } .col .sub { color: var(--muted); font-size: 11px; }
   .col .sc { font-weight: 700; font-size: 12px; padding: 1px 6px; border-radius: 5px; color: #000; }
   .col .note { padding: 10px 12px; color: var(--muted); font-size: 12px; }
+  .wl { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 13px; margin-top: 6px; align-items: baseline; }
+  .wl .muted { font-size: 12px; }
   .disclaimer { color: var(--muted); font-size: 12px; padding: 0 20px 20px; text-align: center; }
   @media (max-width: 700px) {
     .hide-sm { display: none; } td, th { padding: 8px 6px; }
@@ -222,6 +224,11 @@ function render() {
     const pts = h.map((v, i) => `${(i / Math.max(1, h.length - 1)) * 100},${66 - ((v - lo) / span) * 62}`).join(' ');
     const base = 66 - ((P.startSol - lo) / span) * 62;
     const col = P.pnlSol >= 0 ? 'var(--green)' : 'var(--red)';
+    const wlLine = (w) => !w || !(w.wins + w.losses) ? '' : `<div class="wl">
+        <span class="up">✅ ${w.wins} win${w.wins === 1 ? '' : 's'}</span><span class="down">❌ ${w.losses} loss${w.losses === 1 ? '' : 'es'}</span>
+        <span class="muted">win rate ${w.winRate}% · avg win <span class="up">${w.wins ? sgn(w.avgWinPct) + '%' : '—'}</span> · avg loss <span class="down">${w.losses ? sgn(w.avgLossPct) + '%' : '—'}</span>
+        · best ${sgn(w.bestPct)}% · worst ${sgn(w.worstPct)}%
+        · profit factor <b class="${w.profitFactor == null || w.profitFactor >= 1 ? 'up' : 'down'}">${w.profitFactor == null ? '∞' : w.profitFactor.toFixed(2)}</b></span></div>`;
     const A = P.allTime;
     let allHtml = '';
     if (A && A.days) {
@@ -236,7 +243,10 @@ function render() {
           <span class="muted" style="font-size:12px">${A.days} day${A.days === 1 ? '' : 's'} · ${A.greenDays} green / ${A.redDays} red · ${A.trades} trades · win ${A.winRate}%${A.greenDays + A.redDays ? ` · avg day ${A.avgDay >= 0 ? '+' : '-'}$${Math.abs(A.avgDay).toFixed(2)} · best +$${A.best.toFixed(2)} · worst -$${Math.abs(A.worst).toFixed(2)}` : ''}</span></div>
         <svg viewBox="0 0 100 60" preserveAspectRatio="none" style="height:60px"><line x1="0" x2="100" y1="30" y2="30" stroke="var(--line)" vector-effect="non-scaling-stroke"/>${bars}
           <polyline points="${line}" fill="none" stroke="var(--accent)" stroke-width="1.5" vector-effect="non-scaling-stroke"/></svg>
-        <div class="muted" style="font-size:11px;margin-bottom:12px">Bars = each day's profit/loss (faded = today so far) · purple line = running total</div>
+        <div class="muted" style="font-size:11px;margin-bottom:6px">Bars = each day's profit/loss (faded = today so far) · purple line = running total</div>
+        ${wlLine(P.winLoss?.allTime)}
+        ${P.moonbags?.count ? `<div class="muted" style="font-size:12px;margin-top:4px">🌙 Moonbags so far: ${P.moonbags.count} closed · ${P.moonbags.winners} in profit · <span class="${P.moonbags.pnlUsd >= 0 ? 'up' : 'down'}">${P.moonbags.pnlUsd >= 0 ? '+' : '-'}$${Math.abs(P.moonbags.pnlUsd).toFixed(2)}</span> added to all-time</div>` : ''}
+        <div style="margin-bottom:12px"></div>
         <div class="muted" style="font-size:12px;text-transform:uppercase;letter-spacing:.6px">Today</div>`;
     }
     $('paper').innerHTML = allHtml + `
@@ -247,10 +257,11 @@ function render() {
         ${P.daily.lowHit ? `<span class="down"> · ⚠️ under $${P.daily.lowUsd}${P.daily.stopAtLow ? ', done for today' : ''}</span>` : ''}</div>` : ''}
       <svg viewBox="0 0 100 70" preserveAspectRatio="none"><line x1="0" x2="100" y1="${base}" y2="${base}" stroke="var(--line)" stroke-dasharray="2 2" vector-effect="non-scaling-stroke"/>
         <polyline points="${pts}" fill="none" stroke="${col}" stroke-width="2" vector-effect="non-scaling-stroke"/></svg>
-      <div class="row muted" style="font-size:12px"><span>${P.trades} closed trade${P.trades === 1 ? '' : 's'}</span><span>win rate ${P.winRate}%</span>
-        ${P.trades ? `<span>best ${sgn(P.best)}%</span><span>worst ${sgn(P.worst)}%</span>` : ''}</div>
+      ${wlLine(P.winLoss?.today) || '<div class="muted" style="font-size:12px">No finished trades yet today</div>'}
       ${s.demo ? '<div class="rules" style="color:var(--yellow)">Demo coins are made up and pump far more than real ones, so these demo results mean nothing.</div>' : ''}
       ${P.open.length ? `<ul class="mini">${P.open.map((o) => `<li><span><a href="#" data-open="${o.mint}" style="color:var(--text)">$${esc(o.symbol)}</a> <span class="muted">open ${age(Math.round((Date.now() - o.openedAt) / 1000))}${o.trailing ? ' · trailing' : ''}</span></span><span class="${o.pnlPct >= 0 ? 'up' : 'down'}">${o.pnlPct >= 0 ? '+' : ''}${o.pnlPct.toFixed(1)}%</span></li>`).join('')}</ul>` : '<div class="muted" style="font-size:13px;margin-top:6px">No open positions — waiting for the next alert.</div>'}
+      ${P.moonbags?.open.length ? `<div class="muted" style="font-size:12px;margin-top:10px">🌙 Moonbags (kept ${P.moonbags.pct}% after graduation, separate from today's budget)</div>
+        <ul class="mini">${P.moonbags.open.map((m) => `<li><span>$${esc(m.symbol)} <span class="muted">held ${age(Math.round((Date.now() - m.since) / 1000))}</span></span><span class="${m.mult >= 1 ? 'up' : 'down'}">${m.mult.toFixed(2)}x since graduation</span></li>`).join('')}</ul>` : ''}
       ${P.recent.length ? `<ul class="mini">${P.recent.slice(0, 5).map((t) => `<li><span>$${esc(t.symbol)} <span class="muted">${esc(t.why)}</span></span><span class="${t.pnlPct >= 0 ? 'up' : 'down'}">${t.pnlPct >= 0 ? '+' : ''}${t.pnlPct.toFixed(1)}%</span></li>`).join('')}</ul>` : ''}
       ${P.daily?.days.length ? `<ul class="mini">${P.daily.days.slice(0, 7).map((d) => { const pc = (d.endUsd / d.startUsd - 1) * 100;
         return `<li><span>${esc(d.day)} <span class="muted">${d.trades} trade${d.trades === 1 ? '' : 's'}</span></span><span class="${pc >= 0 ? 'up' : 'down'}">$${d.startUsd.toFixed(0)} → $${d.endUsd.toFixed(2)} (${sgn(pc, 1)}%)</span></li>`; }).join('')}</ul>` : ''}
@@ -259,6 +270,7 @@ function render() {
       <div class="rules">Rules: ${P.rules.sizePct}% per trade, max ${P.rules.maxOpen} open · stop when price −${P.rules.stopPct}% · trailing ${P.rules.trailPct}% after price +${P.rules.trailStartPct}%
         ${P.rules.gradTakePct ? ` · sell half at ${P.rules.gradTakePct}% of the curve, rest ${P.rules.gradExitMin} min after graduation` : ''}
         ${P.rules.stallMin ? ` · exit if not +${P.rules.stallGainPct}% within ${P.rules.stallMin} min` : ''} · max ${P.rules.maxHoldMin} min ·
+        ${P.moonbags?.enabled ? `moonbag ${P.moonbags.pct}% on strong coins after graduation ·` : ''}
         costs: ${P.rules.feePct.toFixed(2)}% fees per side + slippage, sandwich bots and network fees</div>`;
   }
 

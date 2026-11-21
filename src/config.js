@@ -98,6 +98,10 @@ export const config = {
   paperStallMin: num('PAPER_STALL_MIN', 25),         // exit if no follow-through within this many minutes...
   paperStallGainPct: num('PAPER_STALL_GAIN_PCT', 30), // ...meaning the price never got this % above the entry
   paperMaxHoldMin: num('PAPER_MAX_HOLD_MIN', 90),
+  paperMoonbagPct: num('PAPER_MOONBAG_PCT', 15),       // keep this % of the position after graduation on strong coins (0 = off)
+  paperMoonbagTrailPct: num('PAPER_MOONBAG_TRAIL_PCT', 50), // sell the moonbag after this drop from its best price
+  paperMoonbagMaxHours: num('PAPER_MOONBAG_MAX_HOURS', 48),
+  paperMoonbagMinNarrative: num('PAPER_MOONBAG_MIN_NARRATIVE', 80), // ...or a narrative this strong, if no lasting trend
   paperFeePct: num('PAPER_FEE_PCT', 1.25),           // Pump.fun trading fee per side
   paperTxFeeSol: num('PAPER_TX_FEE_SOL', 0.0015),    // network + priority fee per transaction (match your Padre setting)
   paperSlippagePct: num('PAPER_SLIPPAGE_PCT', 2),    // extra slippage from being slower than snipers

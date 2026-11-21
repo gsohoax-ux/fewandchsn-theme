@@ -81,6 +81,19 @@ move, its cost hurdle, and the market mood at entry.
 profitable over a good number of trades. It also means giving the bot a wallet key, so it needs
 extra safety work first.
 
+### 🌙 Moonbags and ✅ wins vs ❌ losses
+
+- **Moonbag:** on coins that **graduate cleanly** (still SAFE, no insider dump or dev selling) **and** have a
+  **lasting story** (a multi-day trend, or narrative ≥ `PAPER_MOONBAG_MIN_NARRATIVE`=80), the graduation
+  exit keeps `PAPER_MOONBAG_PCT` (15%) of the original position. It sells after a `PAPER_MOONBAG_TRAIL_PCT` (50%)
+  drop from its best price, when liquidity disappears, or after `PAPER_MOONBAG_MAX_HOURS` (48). Prices
+  come from DexScreener, so it keeps working after the bot stops watching the coin and across restarts.
+  Moonbags sit **outside the daily $ budget** (moved out at their value), and their results are added to the
+  all-time total and shown separately, so you can see whether they help. `PAPER_MOONBAG_PCT=0` turns them off.
+- **Wins vs losses** (today and all time): wins, losses, win rate, average win, average loss, best, worst and
+  **profit factor** (money won ÷ money lost; above 1.0 = profitable). A position counts once it's completely
+  finished, with its partial sells and moonbag added together.
+
 ### 📜 Desk, Logger and "Why they died"
 
 The dashboard shows each part of the bot (Scout, Filter, Analyst, Alerts, Executor, Risk) with

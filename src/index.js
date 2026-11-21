@@ -34,6 +34,7 @@ if (cfg.demo) cfg.xPollSec = 15;
 const xwatch = new XWatcher({ source: xSource, ai, cfg, notifier, log });
 const learner = new Learner({ store, cfg, log });
 const paper = new PaperTrader({ cfg, store, log, getSolUsd: () => engine.solUsd, getRegime: () => engine.regime(),
+  moonbagWorthy: (mint) => engine.moonbagWorthy(mint),
   onEvent: (agent, coin, text, level) => engine.logEvent(agent, coin, text, level),
   onNotify: (text) => notifier.info(text) });
 const trends = cfg.trends ? new TrendScanner({ cfg, store, ai, notifier, log, demo: cfg.demo, extraItems: () => engine.trendItems() }) : null;

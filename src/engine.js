@@ -44,6 +44,7 @@ export class Engine {
     if (this.xwatch?.enabled) this.xwatch.start();
     this.trends?.start();
     setInterval(() => this.tick(), 2000).unref();
+    if (this.paper) setInterval(() => this.paper.pollMoonbags().catch(() => {}), 2 * 60_000).unref();
     if (this.learner) {
       this.store.finalizeStale(Date.now() - this.cfg.learnHorizonMin * 60_000);
       try { this.learner.train(); } catch (e) { this.log.warn(`learning: ${e.message}`); }
@@ -125,6 +126,14 @@ export class Engine {
    * matching top slice of recently scored clean coins - so quiet days still surface the best coins -
    * kept between ALERT_FLOOR and ALERT_CEILING. Falls back to the fixed bar until there is enough data.
    */
+  /** Moonbag only for coins that graduated cleanly AND have a lasting story (multi-day trend or top narrative). */
+  moonbagWorthy(mint) {
+    const c = this.coins.get(mint);
+    const r = c?.result;
+    if (!r || r.safety.verdict !== 'SAFE' || c.warningsSent.has('insider-dump') || c.warningsSent.has('dev-sell')) return false;
+    return Boolean(r.trend?.longevity) || r.narrative.score >= this.cfg.paperMoonbagMinNarrative;
+  }
+
   alertBar(now = Date.now()) {
     const cfg = this.cfg;
     const fixed = cfg.alertMinScore + (this.regime().state === 'cold' ? cfg.coldScoreBump : 0);
@@ -284,6 +293,7 @@ export class Engine {
     coin.applyTrade(msg);
     for (const s of coin.samples.values()) if (!s.done) s.peak = Math.max(s.peak, coin.mcSol);
     if (this.paper?.positions.has(coin.mint)) this.paper.onPrice(coin, this.coins);
+    if (this.paper?.moonbags.has(coin.mint)) this.paper.moonbagPrice(coin.mint, coin.mcSol);
     if (coin.progress >= 30) this.trendsTracker.recordRunner(coin);
     if (!coin.alert) return;
     if (!wasDevSold && coin.devSold) this.#warn(coin, 'dev-sell', 'Dev started selling');

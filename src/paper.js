@@ -15,8 +15,14 @@ export function dayKey(ms, tz = 'UTC') {
 }
 
 export class PaperTrader {
-  constructor({ cfg, store, log = console, onEvent = () => {}, onNotify = async () => {}, getSolUsd = () => 0, getRegime = () => null }) {
-    Object.assign(this, { cfg, store, log, onEvent, onNotify, getSolUsd, getRegime });
+  constructor({ cfg, store, log = console, onEvent = () => {}, onNotify = async () => {}, getSolUsd = () => 0, getRegime = () => null,
+    moonbagWorthy = () => false, fetchFn = fetch }) {
+    Object.assign(this, { cfg, store, log, onEvent, onNotify, getSolUsd, getRegime, moonbagWorthy, fetchFn });
+    // Moonbags: small leftovers kept after graduation on strong coins. They live OUTSIDE the daily
+    // budget (moved out at their value, like a sale), so each day stays clean, and get their own results.
+    const mb = store.getKv('moonbags') ?? {};
+    this.moonbags = new Map((mb.open ?? []).map((m) => [m.mint, m]));
+    this.moonbagLog = mb.closed ?? [];
     this.positions = new Map(); // mint -> position
     // Daily budget mode: a fresh $ budget every day (e.g. $30), with a low-balance warning
     this.daily = cfg.paperDailyUsd > 0;
@@ -120,7 +126,7 @@ export class PaperTrader {
     const pos = { mint: coin.mint, symbol: coin.symbol, name: coin.name, openedAt: now, costSol: size, tokens,
       entryMc: coin.mcSol, peakMc: coin.mcSol, lowMc: coin.mcSol, entryProgress: coin.progress, stage, score,
       regime: this.getRegime?.()?.rate ?? null, peakValue: 0, lastValue: 0, lastMc: coin.mcSol, trailing: false,
-      halfTaken: false, migratedAt: null, deployTool, vamp };
+      halfTaken: false, migratedAt: null, deployTool, vamp, origTokens: tokens };
     pos.peakValue = pos.lastValue = this.valueOf(pos, coin);
     pos.hurdle = 1 - pos.lastValue / size; // what the price must rise just to break even
     this.positions.set(coin.mint, pos);
@@ -132,6 +138,7 @@ export class PaperTrader {
   #skip(coin, why) { this.onEvent('EXECUTOR', coin, `skipped: ${why}`, 'muted'); return null; }
 
   /** Check the risk rules after every trade on a coin we hold. */
+  // (moonbags get prices via moonbagPrice / pollMoonbags)
   onPrice(coin, coins, now = Date.now()) {
     const pos = this.positions.get(coin.mint);
     if (!pos) return;
@@ -207,7 +214,9 @@ export class PaperTrader {
       if (!coin) { this.close(pos, null, coins, 'coin stopped trading', now); continue; }
       const c = this.cfg;
       if (pos.migratedAt && c.paperGradExitMin != null && now - pos.migratedAt >= c.paperGradExitMin * 60_000) {
-        this.close(pos, coin, coins, `sold ${c.paperGradExitMin} min after graduation`, now); continue;
+        if (c.paperMoonbagPct > 0 && !this.moonbags.has(pos.mint) && this.moonbagWorthy(pos.mint)) this.#toMoonbag(pos, coin, coins, now);
+        else this.close(pos, coin, coins, `sold ${c.paperGradExitMin} min after graduation`, now);
+        continue;
       }
       // No follow-through: most coins die fast, so don't wait the full hold time on a dud
       if (c.paperStallMin && !pos.trailing && now - pos.openedAt >= c.paperStallMin * 60_000 &&
@@ -226,6 +235,72 @@ export class PaperTrader {
       this.#save(coins);
     }
   }
+
+  /** Sell everything except a small slice; the slice leaves the daily account at its current value. */
+  #toMoonbag(pos, coin, coins, now) {
+    const keepTokens = Math.min(pos.tokens, (pos.origTokens ?? pos.tokens) * (this.cfg.paperMoonbagPct / 100));
+    const frac = keepTokens / pos.tokens;
+    if (frac < 1) this.#sellPart(pos, coin, coins, 1 - frac, `sold ${this.cfg.paperGradExitMin} min after graduation (moonbag kept)`, now);
+    const value = this.valueOf(pos, coin);
+    this.cash += value;                                       // moved out of today's account at its value
+    this.positions.delete(pos.mint);
+    this.#record(pos, value, 'kept as moonbag', now, coin?.mcSol ?? pos.lastMc);
+    const mcNow = coin?.mcSol ?? pos.lastMc;
+    this.moonbags.set(pos.mint, { mint: pos.mint, symbol: pos.symbol, tokens: pos.tokens, baseValue: value, baseMc: mcNow,
+      peakMc: mcNow, lastMc: mcNow, since: now, lastPriceAt: now });
+    this.onEvent('RISK', coin ?? pos, `🌙 kept ${this.cfg.paperMoonbagPct}% as a moonbag (worth ${value.toFixed(4)} SOL)`, 'good');
+    this.#saveMoonbags();
+    this.#save(coins);
+  }
+
+  /** Moonbag price update (from DexScreener, or the live feed while the bot still tracks the coin). */
+  moonbagPrice(mint, mcSol, now = Date.now()) {
+    const m = this.moonbags.get(mint);
+    if (!m || !(mcSol > 0)) return;
+    m.lastMc = mcSol; m.lastPriceAt = now; m.peakMc = Math.max(m.peakMc, mcSol);
+    if (mcSol <= m.peakMc * (1 - this.cfg.paperMoonbagTrailPct / 100)) this.#closeMoonbag(m, `moonbag trailing stop`, now);
+  }
+
+  #moonbagValue(m) {
+    const c = this.cfg;
+    const raw = m.tokens * (m.lastMc / 1e9) * 0.98;
+    return Math.max(0, raw * (1 - this.#feePct / 100) * (1 - c.paperSlippagePct / 100) - c.paperTxFeeSol);
+  }
+
+  #closeMoonbag(m, why, now = Date.now()) {
+    const proceeds = this.#moonbagValue(m);
+    this.moonbags.delete(m.mint);
+    const solUsd = this.getSolUsd();
+    this.moonbagLog.unshift({ mint: m.mint, symbol: m.symbol, baseValue: m.baseValue, proceeds, why, since: m.since, closedAt: now,
+      pnlUsd: (proceeds - m.baseValue) * (solUsd || 0), mult: m.baseValue ? proceeds / m.baseValue : 0 });
+    this.moonbagLog = this.moonbagLog.slice(0, 500);
+    const pct = m.baseValue ? (proceeds / m.baseValue - 1) * 100 : 0;
+    this.onEvent('RISK', m, `🌙 moonbag sold: ${why} (${pct >= 0 ? '+' : ''}${pct.toFixed(0)}% since graduation)`, pct >= 0 ? 'good' : 'bad');
+    this.#saveMoonbags();
+  }
+
+  /** Price moonbags from DexScreener (works after the bot stops tracking the coin, and across restarts). */
+  async pollMoonbags(now = Date.now()) {
+    const solUsd = this.getSolUsd();
+    for (const m of [...this.moonbags.values()]) {
+      if (now - m.since > this.cfg.paperMoonbagMaxHours * 3600_000) { this.#closeMoonbag(m, `moonbag time limit (${this.cfg.paperMoonbagMaxHours}h)`, now); continue; }
+      if (!(solUsd > 0)) continue;
+      try {
+        const res = await this.fetchFn(`https://api.dexscreener.com/latest/dex/tokens/${m.mint}`, { signal: AbortSignal.timeout(8000) });
+        if (!res.ok) continue;
+        const j = await res.json();
+        const pairs = (Array.isArray(j) ? j : j.pairs ?? []).filter((x) => x.chainId === 'solana' || !x.chainId);
+        const best = pairs.sort((a, b) => (b.liquidity?.usd ?? 0) - (a.liquidity?.usd ?? 0))[0];
+        const mcUsd = best?.marketCap ?? best?.fdv;
+        if (mcUsd > 0) this.moonbagPrice(m.mint, mcUsd / solUsd, now);
+        // A coin whose liquidity is gone is dead: close the moonbag at what's left
+        if (best && (best.liquidity?.usd ?? 1) < 500) this.#closeMoonbag(m, 'moonbag: liquidity gone', now);
+      } catch { /* try again next time */ }
+    }
+    this.#saveMoonbags();
+  }
+
+  #saveMoonbags() { this.store.setKv('moonbags', { open: [...this.moonbags.values()], closed: this.moonbagLog }); }
 
   close(pos, coin, coins, why, now = Date.now()) {
     const proceeds = this.valueOf(pos, coin);
@@ -267,12 +342,45 @@ export class PaperTrader {
     const series = [...days].reverse();
     let run = 0;
     return {
-      days: days.length, pnlUsd: days.reduce((a, d) => a + d.pnlUsd, 0),
+      days: days.length, pnlUsd: days.reduce((a, d) => a + d.pnlUsd, 0) + this.moonbagLog.reduce((a, m) => a + (m.pnlUsd ?? 0), 0),
+      moonbagPnlUsd: this.moonbagLog.reduce((a, m) => a + (m.pnlUsd ?? 0), 0),
       greenDays: done.filter((d) => d.pnlUsd > 0).length, redDays: done.filter((d) => d.pnlUsd < 0).length,
       trades: closed.length, winRate: closed.length ? Math.round((wins / closed.length) * 100) : 0,
       best: done.length ? Math.max(...done.map((d) => d.pnlUsd)) : 0, worst: done.length ? Math.min(...done.map((d) => d.pnlUsd)) : 0,
       avgDay: done.length ? done.reduce((a, d) => a + d.pnlUsd, 0) / done.length : 0,
       series: series.slice(-60).map((d) => ({ day: d.day, pnlUsd: d.pnlUsd, total: (run += d.pnlUsd), today: Boolean(d.today) })),
+    };
+  }
+
+  /** Wins vs losses, counting each position once (its partial sells added together). */
+  winLoss(sinceMs = 0) {
+    const byPos = new Map();
+    for (const t of this.store.paperTradesSince(sinceMs)) {
+      if (t.why === 'closed by restart') continue;
+      const k = `${t.mint}:${t.opened_at}`;
+      const g = byPos.get(k) ?? { symbol: t.symbol, cost: 0, proceeds: 0 };
+      g.cost += t.cost_sol; g.proceeds += t.proceeds_sol;
+      byPos.set(k, g);
+    }
+    // a moonbag's later result belongs to the same position
+    for (const m of this.moonbagLog) {
+      if (m.closedAt < sinceMs) continue;
+      for (const [k, g] of byPos) if (k.startsWith(`${m.mint}:`)) { g.proceeds += m.proceeds - m.baseValue; break; }
+    }
+    // only finished positions count: still open (part sold) or still holding a moonbag = not decided yet
+    for (const k of [...byPos.keys()]) {
+      const [mint, opened] = [k.slice(0, k.lastIndexOf(':')), Number(k.slice(k.lastIndexOf(':') + 1))];
+      if (this.positions.get(mint)?.openedAt === opened || this.moonbags.has(mint)) byPos.delete(k);
+    }
+    const res = [...byPos.values()].map((g) => ({ symbol: g.symbol, pct: (g.proceeds / g.cost - 1) * 100, sol: g.proceeds - g.cost }));
+    const wins = res.filter((r) => r.sol > 0), losses = res.filter((r) => r.sol <= 0);
+    const avg = (a) => (a.length ? a.reduce((s, r) => s + r.pct, 0) / a.length : 0);
+    const wonSol = wins.reduce((s, r) => s + r.sol, 0), lostSol = -losses.reduce((s, r) => s + r.sol, 0);
+    return {
+      wins: wins.length, losses: losses.length, winRate: res.length ? Math.round((wins.length / res.length) * 100) : 0,
+      avgWinPct: avg(wins), avgLossPct: avg(losses),
+      bestPct: res.length ? Math.max(...res.map((r) => r.pct)) : 0, worstPct: res.length ? Math.min(...res.map((r) => r.pct)) : 0,
+      profitFactor: lostSol > 0 ? wonSol / lostSol : wins.length ? null : 0,
     };
   }
 
@@ -319,6 +427,15 @@ export class PaperTrader {
         stallGainPct: this.cfg.paperStallGainPct, feePct: this.#feePct },
       byStage: this.#byStage(),
       allTime: this.daily ? this.allTime(coins, solUsd) : null,
+      winLoss: { today: this.winLoss(this.daily ? this.dayOpenedAt || Date.now() : 0), allTime: this.winLoss(0) },
+      moonbags: {
+        enabled: this.cfg.paperMoonbagPct > 0, pct: this.cfg.paperMoonbagPct,
+        open: [...this.moonbags.values()].map((m) => ({ mint: m.mint, symbol: m.symbol, valueSol: this.#moonbagValue(m),
+          mult: m.baseValue ? this.#moonbagValue(m) / m.baseValue : 1, since: m.since })),
+        closed: this.moonbagLog.slice(0, 5), count: this.moonbagLog.length,
+        pnlUsd: this.moonbagLog.reduce((a, m) => a + (m.pnlUsd ?? 0), 0),
+        winners: this.moonbagLog.filter((m) => m.proceeds > m.baseValue).length,
+      },
       open: [...this.positions.values()].map((p) => {
         const v = this.valueOf(p, coins.get(p.mint));
         return { mint: p.mint, symbol: p.symbol, costSol: p.costSol, valueSol: v, pnlPct: (v / p.costSol - 1) * 100,
