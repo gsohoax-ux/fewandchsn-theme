@@ -3,7 +3,7 @@
 const clamp = (x, a = 0, b = 100) => Math.max(a, Math.min(b, x));
 const sat = (x, half) => x <= 0 ? 0 : x / (x + half); // 0..1, = 0.5 at x = half
 
-export function analyzeMomentum(coin, now = Date.now(), smartWallets = new Set(), insiders = new Set()) {
+export function analyzeMomentum(coin, now = Date.now(), smartWallets = new Set(), insiders = new Set(), whaleSol = 3) {
   const w2 = now - 120_000;
   const recent = coin.trades.filter((t) => t.ts >= w2);
   const DUST_SOL = 0.02;
@@ -36,6 +36,11 @@ export function analyzeMomentum(coin, now = Date.now(), smartWallets = new Set()
   // Real holders: at least 0.01% of supply (100k tokens), not dust wallets
   const realHolders = [...coin.balances.values()].filter((b) => b >= 100_000).length;
 
+  // Whale buys: big buys from real (non-insider) wallets in the last 2 minutes
+  const whales = buys.filter((t) => t.sol >= whaleSol);
+  const whaleBuys = new Set(whales.map((t) => t.trader)).size;
+  const whaleSolTotal = whales.reduce((s, t) => s + t.sol, 0);
+
   const smartHolders = [...smartWallets].filter((w) => (coin.balances.get(w) ?? 0) > 1);
 
   // Drawdown from the top - a coin 60% off its high is not "going up"
@@ -55,7 +60,7 @@ export function analyzeMomentum(coin, now = Date.now(), smartWallets = new Set()
   return {
     score: Math.round(clamp(score)),
     progressPerMin, uniqueBuyers2m, buySellRatio: ratio, netInflowSol: buySol - sellSol,
-    buys2m: buys.length, sells2m: sells.length, washPct, drawdownPct, dustPct,
+    buys2m: buys.length, sells2m: sells.length, washPct, drawdownPct, dustPct, whaleBuys, whaleSol: whaleSolTotal,
     holders: realHolders, smartHolders,
   };
 }

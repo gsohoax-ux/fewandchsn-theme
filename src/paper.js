@@ -102,7 +102,7 @@ export class PaperTrader {
   }
 
   /** Buy on an alert. */
-  open(coin, { stage, score, deployTool = null, vamp = false }, coins, now = Date.now()) {
+  open(coin, { stage, score, deployTool = null, vamp = false, runner = false }, coins, now = Date.now()) {
     if (!this.enabled || this.positions.has(coin.mint) || coin.migrated) return null;
     if (this.daily && !this.day) return this.#skip(coin, 'waiting for the SOL price to load today\'s budget');
     if (this.daily && this.cfg.paperStopAtLow && this.lowAlerted) return this.#skip(coin, `budget under $${this.cfg.paperLowUsd} - done for today`);
@@ -126,7 +126,7 @@ export class PaperTrader {
     const pos = { mint: coin.mint, symbol: coin.symbol, name: coin.name, openedAt: now, costSol: size, tokens,
       entryMc: coin.mcSol, peakMc: coin.mcSol, lowMc: coin.mcSol, entryProgress: coin.progress, stage, score,
       regime: this.getRegime?.()?.rate ?? null, peakValue: 0, lastValue: 0, lastMc: coin.mcSol, trailing: false,
-      halfTaken: false, migratedAt: null, deployTool, vamp, origTokens: tokens };
+      halfTaken: false, migratedAt: null, deployTool, vamp, origTokens: tokens, runner };
     pos.peakValue = pos.lastValue = this.valueOf(pos, coin);
     pos.hurdle = 1 - pos.lastValue / size; // what the price must rise just to break even
     this.positions.set(coin.mint, pos);
@@ -160,13 +160,14 @@ export class PaperTrader {
       this.onEvent('RISK', coin, `trailing stop active after price +${(peakMove * 100).toFixed(0)}%`);
     }
     if (move <= -c.paperStopPct / 100) return this.close(pos, coin, coins, `stop loss: price ${(move * 100).toFixed(0)}% (${net()})`, now);
-    const trail = (coin.migrated ? c.paperTrailAfterGradPct : null) ?? c.paperTrailPct;
+    const trail = pos.runner ? c.paperRunnerTrailPct ?? c.paperTrailPct : (coin.migrated ? c.paperTrailAfterGradPct : null) ?? c.paperTrailPct;
     if (pos.trailing && mc <= pos.peakMc * (1 - trail / 100)) {
       return this.close(pos, coin, coins, `trailing stop (${net()})`, now);
     }
     // Graduation is often the top: take half off as the curve nears completion
     if (c.paperGradTakePct && !pos.halfTaken && coin.progress >= c.paperGradTakePct) {
-      this.#sellPart(pos, coin, coins, 0.5, `took half at ${coin.progress.toFixed(0)}% of the curve`, now);
+      const frac = pos.runner ? (c.paperRunnerTakePct ?? 25) / 100 : 0.5;
+      this.#sellPart(pos, coin, coins, frac, `took ${frac === 0.5 ? 'half' : `${Math.round(frac * 100)}%`} at ${coin.progress.toFixed(0)}% of the curve${pos.runner ? ' (runner)' : ''}`, now);
     }
   }
 
@@ -214,16 +215,16 @@ export class PaperTrader {
       if (!coin) { this.close(pos, null, coins, 'coin stopped trading', now); continue; }
       const c = this.cfg;
       if (pos.migratedAt && c.paperGradExitMin != null && now - pos.migratedAt >= c.paperGradExitMin * 60_000) {
-        if (c.paperMoonbagPct > 0 && !this.moonbags.has(pos.mint) && this.moonbagWorthy(pos.mint)) this.#toMoonbag(pos, coin, coins, now);
+        if (c.paperMoonbagPct > 0 && !this.moonbags.has(pos.mint) && (pos.runner || this.moonbagWorthy(pos.mint))) this.#toMoonbag(pos, coin, coins, now);
         else this.close(pos, coin, coins, `sold ${c.paperGradExitMin} min after graduation`, now);
         continue;
       }
       // No follow-through: most coins die fast, so don't wait the full hold time on a dud
-      if (c.paperStallMin && !pos.trailing && now - pos.openedAt >= c.paperStallMin * 60_000 &&
+      if (c.paperStallMin && !pos.runner && !pos.trailing && now - pos.openedAt >= c.paperStallMin * 60_000 &&
           (pos.peakMc ?? pos.entryMc) / pos.entryMc - 1 < (c.paperStallGainPct ?? 0) / 100) {
         this.close(pos, coin, coins, `no follow-through in ${c.paperStallMin} min`, now); continue;
       }
-      if (now - pos.openedAt > this.cfg.paperMaxHoldMin * 60_000) {
+      if (now - pos.openedAt > (pos.runner ? c.paperRunnerMaxHoldMin ?? c.paperMaxHoldMin : c.paperMaxHoldMin) * 60_000) {
         const pnl = this.valueOf(pos, coin) / pos.costSol - 1;
         this.close(pos, coin, coins, `time stop ${pnl >= 0 ? '+' : ''}${(pnl * 100).toFixed(0)}%`, now);
       }
@@ -238,7 +239,8 @@ export class PaperTrader {
 
   /** Sell everything except a small slice; the slice leaves the daily account at its current value. */
   #toMoonbag(pos, coin, coins, now) {
-    const keepTokens = Math.min(pos.tokens, (pos.origTokens ?? pos.tokens) * (this.cfg.paperMoonbagPct / 100));
+    const keepPct = pos.runner ? this.cfg.paperRunnerMoonbagPct ?? this.cfg.paperMoonbagPct : this.cfg.paperMoonbagPct;
+    const keepTokens = Math.min(pos.tokens, (pos.origTokens ?? pos.tokens) * (keepPct / 100));
     const frac = keepTokens / pos.tokens;
     if (frac < 1) this.#sellPart(pos, coin, coins, 1 - frac, `sold ${this.cfg.paperGradExitMin} min after graduation (moonbag kept)`, now);
     const value = this.valueOf(pos, coin);
@@ -251,6 +253,12 @@ export class PaperTrader {
     this.onEvent('RISK', coin ?? pos, `🌙 kept ${this.cfg.paperMoonbagPct}% as a moonbag (worth ${value.toFixed(4)} SOL)`, 'good');
     this.#saveMoonbags();
     this.#save(coins);
+  }
+
+  /** A coin we already hold turned out to be a runner: give it runner exits from now on. */
+  markRunner(mint) {
+    const pos = this.positions.get(mint);
+    if (pos && !pos.runner) { pos.runner = true; this.onEvent('RISK', pos, '🚀 runner: wider trail, bigger moonbag, longer hold'); }
   }
 
   /** Moonbag price update (from DexScreener, or the live feed while the bot still tracks the coin). */
@@ -317,7 +325,7 @@ export class PaperTrader {
       costSol: pos.costSol, proceedsSol: proceeds, why, stage: pos.stage, score: pos.score, entryMc: pos.entryMc, exitMc,
       entryProgress: pos.entryProgress ?? null, mfe: pos.peakMc ? pos.peakMc / pos.entryMc - 1 : null,
       mae: pos.lowMc ? pos.lowMc / pos.entryMc - 1 : null, hurdle: pos.hurdle ?? null, regime: pos.regime ?? null,
-      deployTool: pos.deployTool ?? null, vamp: pos.vamp ? 1 : 0 });
+      deployTool: pos.deployTool ?? null, vamp: pos.vamp ? 1 : 0, runner: pos.runner ? 1 : 0 });
     if (why === 'closed by restart') this.cash += proceeds;
   }
 
@@ -398,7 +406,7 @@ export class PaperTrader {
     // Extra rows: quick-deploy coins and copies vs the rest
     for (const t of this.store.paperTradesSince(0)) {
       if (t.why === 'closed by restart') continue;
-      for (const [key, hit] of [['🚀 quick-deploy coins', Boolean(t.deploy_tool)], ['🪞 copies of other coins', Boolean(t.vamp)]]) {
+      for (const [key, hit] of [['🚀 quick-deploy coins', Boolean(t.deploy_tool)], ['🪞 copies of other coins', Boolean(t.vamp)], ['🏃 runner trades', Boolean(t.runner)]]) {
         if (!hit) continue;
         const g = groups.get(key) ?? { key, n: 0, wins: 0, cost: 0, proceeds: 0 };
         g.n++; g.cost += t.cost_sol; g.proceeds += t.proceeds_sol; if (t.proceeds_sol > t.cost_sol) g.wins++;

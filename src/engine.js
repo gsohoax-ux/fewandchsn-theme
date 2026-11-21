@@ -3,7 +3,7 @@ import { Coin } from './coin.js';
 import { gatherChainData, analyzeSafety, launchBlockWallets } from './safety.js';
 import { analyzeMomentum } from './momentum.js';
 import { fetchMetadata, ruleNarrative, socialKey, TrendTracker } from './narrative.js';
-import { combine } from './score.js';
+import { combine, runnerScore } from './score.js';
 import { computeConfidence } from './confidence.js';
 import { featurize } from './learn.js';
 import { matchCoin } from './xwatch.js';
@@ -131,6 +131,7 @@ export class Engine {
     const c = this.coins.get(mint);
     const r = c?.result;
     if (!r || r.safety.verdict !== 'SAFE' || c.warningsSent.has('insider-dump') || c.warningsSent.has('dev-sell')) return false;
+    if (r.runner?.is) return true;
     return Boolean(r.trend?.longevity) || r.narrative.score >= this.cfg.paperMoonbagMinNarrative;
   }
 
@@ -174,7 +175,7 @@ export class Engine {
       mint: c.mint, symbol: c.symbol, name: c.name, ageSec: Math.round(c.ageSec(now)), mcSol: c.mcSol,
       progress: c.progress, buyers: c.organicBuyerCount(), score: c.result?.score ?? null,
       verdict: c.result?.safety.verdict ?? null, light: c.result?.light ?? '', x: Boolean(c.xMatch), trend: Boolean(c.trendMatch),
-      deployTool: c.deployTool ?? null, copy: Boolean(c.copyOf), spark: c.spark(16, 30 * 60_000, now),
+      deployTool: c.deployTool ?? null, copy: Boolean(c.copyOf), spark: c.spark(16, 30 * 60_000, now), runner: Boolean(c.result?.runner?.is),
       alerted: Boolean(c.alert),
     });
     const live = [...this.coins.values()].filter((c) => !c.migrated);
@@ -436,7 +437,7 @@ export class Engine {
       deployTool: coin.deployTool, copyOf: coin.copyOf,
     });
 
-    const momentum = analyzeMomentum(coin, now, cfg.smartWallets, new Set(this.#insiders(coin, chainData)));
+    const momentum = analyzeMomentum(coin, now, cfg.smartWallets, new Set(this.#insiders(coin, chainData)), cfg.whaleSol);
 
     // Narrative (AI only for coins worth it - saves money)
     const nctx = {
@@ -524,6 +525,19 @@ export class Engine {
       }
     }
 
+    // Runner: big-move potential -> its own top-priority alert (once), and room to run in paper trading
+    const rs = runnerScore(coin, coin.result);
+    coin.result.runner = { ...rs, is: rs.score >= cfg.runnerMin && rs.catalyst };
+    if (coin.result.runner.is) {
+      if (this.paper?.positions.has(coin.mint)) this.paper.markRunner(coin.mint);
+      if (!coin.runnerAlerted && !this.paused) {
+        coin.runnerAlerted = true;
+        this.logEvent('ANALYST', coin, `🚀 runner potential ${rs.score}: ${rs.reasons.slice(0, 3).join(', ')}`, 'good');
+        await this.#sendAlert(coin, 'runner', score, light, now);
+        return coin.result;
+      }
+    }
+
     // X narrative alert: about a meme-able post, leading coin on it, rising, and SAFE
     const rising = momentum.score >= cfg.xMinMomentum && momentum.progressPerMin > 0 && momentum.buySellRatio >= 1.2;
     if (x && !coin.xAlerted && !this.paused && safety.verdict === 'SAFE' && rising && x.rank === 1) {
@@ -549,14 +563,16 @@ export class Engine {
 
   async #sendAlert(coin, stage, score, light, now) {
     // One coin, one alert per 10 minutes - except reaching the Final Stretch, which is genuinely new
-    if (coin.alert && now - coin.alert.at < 10 * 60_000 && stage !== 'final') return;
+    if (coin.alert && now - coin.alert.at < 10 * 60_000 && stage !== 'final' && stage !== 'runner') return;
     coin.alert = { stage, at: now, mcSol: coin.mcSol, score };
     coin.peakMcSinceAlert = Math.max(coin.peakMcSinceAlert, coin.mcSol);
     this.store.addAlert(coin, stage, coin.result);
     this.counters.alerts++;
     this.log.info(`ALERT ${light} $${coin.symbol} ${score}/100 [${stage}] conf ${coin.result.confidence.label} ${coin.mint}`);
     this.logEvent('ALERT', coin, `score ${score} · ${stage === 'x' ? 'X narrative' : stage} · ${coin.result.confidence.label} confidence`, 'good');
-    this.paper?.open(coin, { stage, score, deployTool: coin.deployTool, vamp: Boolean(coin.copyOf) }, this.coins, now);
+    if (!this.paper?.positions.has(coin.mint)) {
+      this.paper?.open(coin, { stage, score, deployTool: coin.deployTool, vamp: Boolean(coin.copyOf), runner: Boolean(coin.result.runner?.is) }, this.coins, now);
+    }
     await this.notifier.alert(coin, coin.result, stage);
   }
 
@@ -584,7 +600,7 @@ export class Engine {
       confidence: r?.confidence ?? null, x: r?.x ?? null, trend: r?.trend ?? null,
       deployTool: coin.deployTool ?? null, copyOf: coin.copyOf ?? null,
       label: !r ? null : r.safety.verdict === 'AVOID' ? 'DO NOT BUY' : coin.alert && r.safety.verdict === 'SAFE' && !coin.warningsSent.has('insider-dump') && !coin.warningsSent.has('dev-sell') ? 'BUY ZONE' : r.safety.verdict === 'SAFE' ? 'LOW RISK' : 'WATCH',
-      spark: coin.spark(), outcomes: r ? this.store.similarOutcomes(r.score) : null, learned: r?.learned ?? null, dexPaid: r?.dexPaid ?? null,
+      spark: coin.spark(), outcomes: r ? this.store.similarOutcomes(r.score) : null, runner: r?.runner ?? null, learned: r?.learned ?? null, dexPaid: r?.dexPaid ?? null,
       events: r?.events ?? [],
       alert: coin.alert ? { ...coin.alert, peakMult: coin.alert.mcSol ? coin.peakMcSinceAlert / coin.alert.mcSol : 1 } : null,
     };

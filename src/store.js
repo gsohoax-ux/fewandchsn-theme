@@ -44,6 +44,7 @@ export class Store {
     if (!scols.has('score')) this.db.exec('ALTER TABLE samples ADD COLUMN score INTEGER');
     if (!scols.has('low_mc_sol')) this.db.exec('ALTER TABLE samples ADD COLUMN low_mc_sol REAL');
     if (!pcols.has('vamp')) this.db.exec('ALTER TABLE paper_trades ADD COLUMN vamp INTEGER');
+    if (!pcols.has('runner')) this.db.exec('ALTER TABLE paper_trades ADD COLUMN runner INTEGER');
     const q = (sql) => this.db.prepare(sql);
     this.s = {
       addLaunch: q(`INSERT OR IGNORE INTO launches (mint, creator, symbol, name, social_key, tweet_key, created_at) VALUES (?,?,?,?,?,?,?)`),
@@ -71,8 +72,8 @@ export class Store {
       devHistory: q(`SELECT COUNT(*) finished, SUM(rugged) rugged, SUM(graduated) migrated FROM launches
                      WHERE creator = ? AND mint != ? AND rugged IS NOT NULL`),
       addPaper: q(`INSERT INTO paper_trades (mint, symbol, opened_at, closed_at, cost_sol, proceeds_sol, why, stage, score,
-                   entry_mc, exit_mc, entry_progress, mfe, mae, hurdle, regime, deploy_tool, vamp)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`),
+                   entry_mc, exit_mc, entry_progress, mfe, mae, hurdle, regime, deploy_tool, vamp, runner)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`),
       paperTrades: q(`SELECT * FROM paper_trades ORDER BY closed_at DESC LIMIT ?`),
       paperSince: q(`SELECT * FROM paper_trades WHERE closed_at >= ?`),
       getKv: q(`SELECT v FROM kv WHERE k = ?`),
@@ -128,7 +129,7 @@ export class Store {
   // ---- paper trading ----
   addPaperTrade(t) {
     this.s.addPaper.run(t.mint, t.symbol, t.openedAt, t.closedAt, t.costSol, t.proceedsSol, t.why, t.stage ?? null, t.score ?? null, t.entryMc ?? null, t.exitMc ?? null,
-      t.entryProgress ?? null, t.mfe ?? null, t.mae ?? null, t.hurdle ?? null, t.regime ?? null, t.deployTool ?? null, t.vamp ?? 0);
+      t.entryProgress ?? null, t.mfe ?? null, t.mae ?? null, t.hurdle ?? null, t.regime ?? null, t.deployTool ?? null, t.vamp ?? 0, t.runner ?? 0);
   }
   paperTrades(limit = 50) { return this.s.paperTrades.all(limit); }
   paperTradesSince(ms) { return this.s.paperSince.all(ms); }
@@ -164,6 +165,8 @@ export class Store {
       medianPeakPct: (med(peaks) - 1) * 100,
       hit1_5: Math.round((peaks.filter((p) => p >= 1.5).length / rows.length) * 100),
       hit2: Math.round((peaks.filter((p) => p >= 2).length / rows.length) * 100),
+      hit3: Math.round((peaks.filter((p) => p >= 3).length / rows.length) * 100),
+      hit5: Math.round((peaks.filter((p) => p >= 5).length / rows.length) * 100),
       medianDropPct: drops.length >= minN ? med(drops) * 100 : null,
     };
   }

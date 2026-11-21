@@ -68,6 +68,14 @@ export const config = {
   // Extra text that marks a quick-deploy tool in a coin's details (J7 and "deployed using ..." are built in)
   deployToolPatterns: list('DEPLOY_TOOL_PATTERNS'),
 
+  // Runner hunting: spot coins with big-move potential and give them room
+  runnerMin: num('RUNNER_MIN', 60),                     // runner score needed (0-100)
+  whaleSol: num('WHALE_SOL', 3),                        // a buy this big (SOL) from a real wallet = whale buy
+  paperRunnerTakePct: num('PAPER_RUNNER_TAKE_PCT', 25), // runners: sell only this % near graduation (normal: 50%)
+  paperRunnerMoonbagPct: num('PAPER_RUNNER_MOONBAG_PCT', 30),
+  paperRunnerTrailPct: num('PAPER_RUNNER_TRAIL_PCT', 30),
+  paperRunnerMaxHoldMin: num('PAPER_RUNNER_MAX_HOLD_MIN', 180),
+
   // Self-learning
   learnTarget: num('LEARN_TARGET', 1.5),             // "a hit" = coin reached this multiple after scoring
   learnHorizonMin: num('LEARN_HORIZON_MIN', 120),    // how long after scoring we watch the outcome

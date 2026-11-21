@@ -27,11 +27,15 @@ export function fmtMc(mcSol, solUsd) {
   return usd >= 1e6 ? `$${(usd / 1e6).toFixed(2)}M` : `$${(usd / 1e3).toFixed(1)}k`;
 }
 
-const stageTag = (stage) => ({ fresh: 'NEW PAIR', mid: 'MID-CURVE', final: 'FINAL STRETCH', manual: 'CHECK', x: 'X NARRATIVE', trend: 'TREND' }[stage] ?? 'NEW PAIR');
+const stageTag = (stage) => ({ fresh: 'NEW PAIR', mid: 'MID-CURVE', final: 'FINAL STRETCH', manual: 'CHECK', x: 'X NARRATIVE', trend: 'TREND', runner: '🚀 RUNNER' }[stage] ?? 'NEW PAIR');
 
 function confLine(r) {
   const c = r.confidence;
   return c ? `🎯 Confidence ${c.label} ${c.meter} (${c.value})${c.track ? ` · similar past alerts hit 1.5x ${c.track.hitPct}% of the time` : ''}` : '';
+}
+
+function runnerLine(r) {
+  return r.runner?.is ? `🚀 RUNNER POTENTIAL ${r.runner.score}/100: ${r.runner.reasons.join(' · ')}` : '';
 }
 
 function outcomesLine(r) {
@@ -74,6 +78,7 @@ export function formatAlert(coin, r, stage, { solUsd, padreTemplate } = {}) {
     `${r.light} <b>$${esc(coin.symbol)}</b> · ${esc(coin.name)}   <b>${r.score}/100</b>  [${tag}]`,
     `<code>${coin.mint}</code>`,
     `MC ${fmtMc(coin.mcSol, solUsd)} · Curve ${coin.progress.toFixed(0)}% · Age ${fmtAge(coin.ageSec())} · ${m.holders} holders`,
+    esc(runnerLine(r)),
     esc(confLine(r)),
     esc(learnedLine(r)),
     esc(outcomesLine(r)),
@@ -102,6 +107,7 @@ export function alertNotification(coin, r, stage, { solUsd, padreTemplate, dashb
   const tag = stageTag(stage);
   const message = [
     `${coin.name} · MC ${fmtMc(coin.mcSol, solUsd)} · Curve ${coin.progress.toFixed(0)}% · ${fmtAge(coin.ageSec())} · ${m.holders} holders`,
+    runnerLine(r),
     confLine(r),
     learnedLine(r),
     outcomesLine(r),
@@ -121,9 +127,29 @@ export function alertNotification(coin, r, stage, { solUsd, padreTemplate, dashb
     dashboardUrl && { label: 'Dashboard', url: dashboardUrl },
   ].filter(Boolean);
   return {
-    title: `${stage === 'x' ? '🐦' : stage === 'trend' ? '📈' : r.light} $${coin.symbol} ${r.score}/100 · ${tag}${r.confidence ? ` · ${r.confidence.label} confidence` : ''}`,
-    message, priority: r.score >= 75 ? 5 : 4, click: links.padre || links.pump, actions,
+    title: `${stage === 'runner' ? '🚀' : stage === 'x' ? '🐦' : stage === 'trend' ? '📈' : r.light} $${coin.symbol} ${r.score}/100 · ${tag}${r.confidence ? ` · ${r.confidence.label} confidence` : ''}`,
+    message, priority: r.runner?.is || r.score >= 75 ? 5 : 4, click: links.padre || links.pump, actions,
   };
+}
+
+/** Big-move potential: the signs that tend to come before 5-10x+ runs. */
+export function runnerScore(coin, r) {
+  if (r.safety.verdict !== 'SAFE') return { score: 0, reasons: ['not SAFE'] };
+  const reasons = [];
+  let s = 0;
+  const add = (pts, ok, why) => { if (ok) { s += pts; reasons.push(why); } };
+  add(25, r.narrative.score >= 80, `top narrative (${r.narrative.score})`);
+  add(10, r.narrative.score >= 65 && r.narrative.score < 80, `good narrative (${r.narrative.score})`);
+  add(20, Boolean(r.trend?.longevity || (r.x && r.x.viral >= 70) || (r.trend && r.trend.spike && r.trend.sources.length >= 3)),
+    r.trend ? `trend "${r.trend.label}" (${r.trend.sources.join(' + ')})` : 'viral X post');
+  add(15, r.momentum.score >= 70, `strong momentum (${r.momentum.score})`);
+  add(15, (r.momentum.whaleBuys ?? 0) >= 1, `${r.momentum.whaleBuys} whale buy${r.momentum.whaleBuys > 1 ? 's' : ''} (${(r.momentum.whaleSol ?? 0).toFixed(1)} SOL)`);
+  add(10, Boolean(r.safety.devClean), 'dev with clean past coins');
+  add(10, r.confidence?.label === 'High', 'high confidence');
+  add(5, (r.momentum.smartHolders?.length ?? 0) >= 1, 'smart wallets holding');
+  // A runner needs a real catalyst, not just a good score: a trend/viral post, or whales buying
+  const catalyst = reasons.some((x) => x.startsWith('trend') || x === 'viral X post' || x.includes('whale buy'));
+  return { score: Math.min(100, s), reasons, catalyst };
 }
 
 export function formatWarning(coin, text) {

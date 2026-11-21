@@ -81,6 +81,23 @@ move, its cost hurdle, and the market mood at entry.
 profitable over a good number of trades. It also means giving the bot a wallet key, so it needs
 extra safety work first.
 
+### 🚀 Runner hunting (the big trades)
+
+Big runners (5–10x+) are rare, so the bot looks for the signs that tend to come before them and gives
+those coins room to run, while keeping losses small on everything else.
+
+- **Runner score** (0–100) on SAFE coins: top narrative (80+), a lasting or viral trend / X post, strong
+  momentum, **whale buys** (≥ `WHALE_SOL`=3 SOL from real, non-insider wallets in the last 2 min), clean dev
+  history, High confidence, smart wallets.
+- It's only a runner with score ≥ `RUNNER_MIN` (60) **and a real catalyst**: a trend/viral post or whale buying.
+- **🚀 RUNNER alert:** top priority, sent once even if the coin was alerted before. Coins are marked 🏃 on
+  the Board and in the ranking, and the coin details list the reasons.
+- **Paper trading gives runners room:** sells only `PAPER_RUNNER_TAKE_PCT` (25%) near graduation, keeps a
+  `PAPER_RUNNER_MOONBAG_PCT` (30%) moonbag, uses a `PAPER_RUNNER_TRAIL_PCT` (30%) trail, skips the 25-minute
+  no-follow-through exit, and allows up to `PAPER_RUNNER_MAX_HOLD_MIN` (180) minutes. A coin already held is
+  upgraded if it becomes a runner.
+- Results: "🏃 runner trades" in Results by when it bought, and "Coins like this" adds % that reached 3x and 5x.
+
 ### 🌙 Moonbags and ✅ wins vs ❌ losses
 
 - **Moonbag:** on coins that **graduate cleanly** (still SAFE, no insider dump or dev selling) **and** have a
