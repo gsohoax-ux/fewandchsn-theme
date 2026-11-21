@@ -116,6 +116,12 @@
   .col .note { padding: 10px 12px; color: var(--muted); font-size: 12px; }
   .wl { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 13px; margin-top: 6px; align-items: baseline; }
   .wl .muted { font-size: 12px; }
+  .lb { display: inline-block; font-size: 11px; font-weight: 700; letter-spacing: .6px; padding: 3px 8px; border-radius: 6px; border: 1px solid; white-space: nowrap; }
+  .lb-buy { background: var(--green); color: #04120a; border-color: var(--green); } .lb-low { color: var(--green); border-color: #1f5a3a; }
+  .lb-watch { color: var(--yellow); border-color: #5a4d1f; } .lb-no { background: var(--red); color: #fff; border-color: var(--red); }
+  .outc { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 8px; margin: 6px 0; }
+  .outc div { background: var(--panel2); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; }
+  .outc b { display: block; font-size: 18px; } .outc small { color: var(--muted); font-size: 11px; }
   .disclaimer { color: var(--muted); font-size: 12px; padding: 0 20px 20px; text-align: center; }
   @media (max-width: 700px) {
     .hide-sm { display: none; } td, th { padding: 8px 6px; }
@@ -175,6 +181,15 @@ const age = (s) => s < 60 ? `${s}s` : s < 3600 ? `${Math.floor(s / 60)}m` : `${M
 const mc = (sol) => state?.status.solUsd ? (sol * state.status.solUsd >= 1e6 ? `$${(sol * state.status.solUsd / 1e6).toFixed(2)}M` : `$${(sol * state.status.solUsd / 1e3).toFixed(1)}k`) : `${sol.toFixed(1)} SOL`;
 const ICON = { ok: '✅', warn: '⚠️', bad: '⛔', info: 'ℹ️' };
 
+// mini price chart (market cap over time)
+const sparkSvg = (vals, w = 64, hgt = 18) => {
+  if (!vals || vals.length < 2) return '';
+  const lo = Math.min(...vals), hi = Math.max(...vals), span = hi - lo || 1;
+  const pts = vals.map((v, i) => `${((i / (vals.length - 1)) * w).toFixed(1)},${(hgt - 1 - ((v - lo) / span) * (hgt - 2)).toFixed(1)}`).join(' ');
+  const up = vals.at(-1) >= vals[0];
+  return `<svg width="${w}" height="${hgt}" viewBox="0 0 ${w} ${hgt}" style="vertical-align:middle"><polyline points="${pts}" fill="none" stroke="${up ? 'var(--green)' : 'var(--red)'}" stroke-width="1.5"/></svg>`;
+};
+const LABEL_CLASS = { 'BUY ZONE': 'lb-buy', 'LOW RISK': 'lb-low', WATCH: 'lb-watch', 'DO NOT BUY': 'lb-no' };
 // "claude-haiku-5-5" -> "Haiku 5.5"
 const aiName = (id) => { const m = id.match(/^claude-([a-z]+)-(\d+)(?:-(\d+))?/); return m ? `${m[1][0].toUpperCase()}${m[1].slice(1)} ${m[2]}${m[3] ? '.' + m[3] : ''}` : id; };
 function pill(label, on, title = '') { return `<span class="pill ${on ? 'on' : 'off'}" title="${esc(title)}">${label}</span>`; }
@@ -295,7 +310,7 @@ function render() {
     const row = (c) => `<li data-open="${c.mint}">
       <span><b>${c.x ? '🐦 ' : ''}${c.trend ? '📈 ' : ''}${c.deployTool ? '<span title="Launched with ' + esc(c.deployTool) + '">🚀</span> ' : ''}${c.copy ? '<span title="Copy of an earlier coin">🪞</span> ' : ''}$${esc(c.symbol)}</b> <span class="sub">${esc(c.name).slice(0, 22)}</span></span>
       <span>${c.score != null ? `<span class="sc ${c.verdict === 'AVOID' ? 's-r' : c.score >= 70 ? 's-g' : c.score >= 50 ? 's-y' : 's-n'}">${c.score}</span>` : '<span class="sub">…</span>'}</span>
-      <span class="sub">${mc(c.mcSol)} · ${c.progress.toFixed(0)}% · ${age(c.ageSec)} · ${c.buyers} buyers</span>
+      <span class="sub">${sparkSvg(c.spark, 48, 14)} ${mc(c.mcSol)} · ${c.progress.toFixed(0)}% · ${age(c.ageSec)} · ${c.buyers} buyers</span>
       <span class="sub ${c.verdict ? 'v-' + c.verdict : ''}">${c.alerted ? '🔔 ' : ''}${c.verdict ?? ''}</span></li>`;
     const col = (title, sub, items, empty) => `<div class="col"><h3><span>${title}</span><span>${sub}</span></h3>
       <ul>${items.length ? items.map(row).join('') : `<div class="note">${empty}</div>`}</ul></div>`;
@@ -355,7 +370,7 @@ function render() {
       <td class="v-${c.safety.verdict}">${c.safety.verdict}</td>
       <td class="hide-sm">${c.narrative.score}</td>
       <td class="hide-sm">${c.momentum.score}</td>
-      <td>${mc(c.mcSol)}</td>
+      <td>${mc(c.mcSol)}<div>${sparkSvg(c.spark)}</div></td>
       <td class="hide-sm"><span class="bar"><i style="width:${c.progress.toFixed(0)}%"></i></span>${c.progress.toFixed(0)}%</td>
       <td class="hide-sm">${age(c.ageSec)}</td>
       <td class="hide-sm">${c.holders}</td>
@@ -366,12 +381,19 @@ function render() {
 
 function openCoin(c) {
   const sf = c.safety, n = c.narrative, m = c.momentum;
-  $('dlg-h').innerHTML = `<span class="score ${sc(c)}">${c.score}</span><div><div class="tick">$${esc(c.symbol)} · ${esc(c.name)}</div><code>${c.mint}</code></div><button class="close" onclick="dlg.close()">×</button>`;
+  $('dlg-h').innerHTML = `<span class="score ${sc(c)}">${c.score}</span><div><div class="tick">$${esc(c.symbol)} · ${esc(c.name)} ${c.label ? `<span class="lb ${LABEL_CLASS[c.label]}">${c.label}</span>` : ''}</div><code>${c.mint}</code></div><button class="close" onclick="dlg.close()">×</button>`;
   $('dlg-b').innerHTML = `
-    <div class="links">${c.links.padre ? `<a target="_blank" href="${c.links.padre}">Padre</a>` : ''}<a target="_blank" href="${c.links.pump}">pump.fun</a><a target="_blank" href="${c.links.dexscreener}">DexScreener</a>
+    <div class="links">${c.links.padre ? `<a target="_blank" href="${c.links.padre}">Padre</a>` : ''}<a target="_blank" href="${c.links.pump}">pump.fun</a><a target="_blank" href="${c.links.dexscreener}">DexScreener</a><a target="_blank" rel="noopener" href="${c.links.solscan}">Solscan</a><a target="_blank" rel="noopener" href="${c.links.rugcheck}">RugCheck</a>
       ${c.twitter ? `<a target="_blank" rel="noopener" href="${esc(c.twitter)}">X</a>` : ''}${c.telegram ? `<a target="_blank" rel="noopener" href="${esc(c.telegram)}">Telegram</a>` : ''}
       <button class="copy" data-copy="${c.mint}">Copy CA</button></div>
     ${c.description ? `<p class="muted">${esc(c.description)}</p>` : ''}
+    ${c.spark?.length > 1 ? `<div style="margin:8px 0">${sparkSvg(c.spark, 300, 50)}<div class="muted" style="font-size:11px">market cap, last hour</div></div>` : ''}
+    ${c.outcomes ? `<h3>📊 Coins like this before</h3><div class="outc">
+        <div><b class="up">+${c.outcomes.medianPeakPct.toFixed(0)}%</b><small>typical peak after scoring</small></div>
+        <div><b>${c.outcomes.hit2}%</b><small>reached 2x</small></div>
+        <div><b>${c.outcomes.hit1_5}%</b><small>reached 1.5x</small></div>
+        ${c.outcomes.medianDropPct != null ? `<div><b class="down">−${c.outcomes.medianDropPct.toFixed(0)}%</b><small>typical drop</small></div>` : ''}
+      </div><p class="muted" style="font-size:11px">From ${c.outcomes.n} coins the bot scored ${c.outcomes.scoreFrom}–${c.outcomes.scoreTo} in the last 14 days, 2 hours after scoring. Real history, not a prediction.</p>` : ''}
     ${c.confidence ? `<h3>🎯 Confidence — <span class="c-${c.confidence.label}">${c.confidence.label} ${c.confidence.meter}</span> (${c.confidence.value})</h3>
       <ul class="flags">${c.confidence.reasons.map((r) => `<li class="muted">${esc(r)}</li>`).join('')}</ul>
       <p class="muted" style="font-size:12px">Confidence = how solid the data behind this score is, not the chance of profit.</p>` : ''}

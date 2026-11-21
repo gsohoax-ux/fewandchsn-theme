@@ -174,7 +174,7 @@ export class Engine {
       mint: c.mint, symbol: c.symbol, name: c.name, ageSec: Math.round(c.ageSec(now)), mcSol: c.mcSol,
       progress: c.progress, buyers: c.organicBuyerCount(), score: c.result?.score ?? null,
       verdict: c.result?.safety.verdict ?? null, light: c.result?.light ?? '', x: Boolean(c.xMatch), trend: Boolean(c.trendMatch),
-      deployTool: c.deployTool ?? null, copy: Boolean(c.copyOf),
+      deployTool: c.deployTool ?? null, copy: Boolean(c.copyOf), spark: c.spark(16, 30 * 60_000, now),
       alerted: Boolean(c.alert),
     });
     const live = [...this.coins.values()].filter((c) => !c.migrated);
@@ -291,7 +291,7 @@ export class Engine {
     if (!coin) return;
     const wasDevSold = coin.devSold;
     coin.applyTrade(msg);
-    for (const s of coin.samples.values()) if (!s.done) s.peak = Math.max(s.peak, coin.mcSol);
+    for (const s of coin.samples.values()) if (!s.done) { s.peak = Math.max(s.peak, coin.mcSol); s.low = Math.min(s.low ?? s.mc, coin.mcSol); }
     if (this.paper?.positions.has(coin.mint)) this.paper.onPrice(coin, this.coins);
     if (this.paper?.moonbags.has(coin.mint)) this.paper.moonbagPrice(coin.mint, coin.mcSol);
     if (coin.progress >= 30) this.trendsTracker.recordRunner(coin);
@@ -343,6 +343,7 @@ export class Engine {
       if (s.done) continue;
       const done = final || now - s.at > this.cfg.learnHorizonMin * 60_000;
       this.store.updateSample(coin.mint, stage, s.peak, coin.migrated, done);
+      if (s.low != null) this.store.setSampleLow(coin.mint, stage, s.low);
       s.done = done;
     }
   }
@@ -491,7 +492,7 @@ export class Engine {
 
     const { score, light } = combine(safety, narrative, momentum, useLearned, cfg.learnBlend);
     if (['fresh', 'mid', 'final', 'x', 'trend'].includes(stage) && !coin.samples.has(stage)) {
-      this.store.addSample(coin.mint, stage, now, features, coin.mcSol);
+      this.store.addSample(coin.mint, stage, now, features, coin.mcSol, score);
       coin.samples.set(stage, { at: now, mc: coin.mcSol, peak: coin.mcSol, done: false });
     }
     const confidence = computeConfidence(coin, { safety, narrative, momentum, score, x, trend, learned }, {
@@ -499,7 +500,8 @@ export class Engine {
     });
     const insiderWallets = coin.result?.insiderWallets ?? this.#insiders(coin, chainData);
     const insiderHeldAtEval = coin.result?.insiderHeldAtEval ?? insiderWallets.reduce((s, w) => s + coin.holderPct(w), 0);
-    coin.result = { at: now, stage, score, light, safety, momentum, narrative, confidence, x, trend, learned, dexPaid: paid, insiderWallets,
+    const outcomes = this.store.similarOutcomes(score, now - 14 * 86400_000);
+    coin.result = { at: now, stage, score, light, safety, momentum, narrative, confidence, x, trend, learned, outcomes, dexPaid: paid, insiderWallets,
       insiderHeldAtEval, events: coin.result?.events ?? [] };
     this.counters.evaluated++;
     if (!coin.counted) {
@@ -580,7 +582,9 @@ export class Engine {
       score: r?.score ?? null, light: r?.light ?? '', stage: r?.stage ?? null, evaluatedAt: r?.at ?? null,
       safety: r?.safety ?? null, narrative: r?.narrative ?? null, momentum: r?.momentum ?? null,
       confidence: r?.confidence ?? null, x: r?.x ?? null, trend: r?.trend ?? null,
-      deployTool: coin.deployTool ?? null, copyOf: coin.copyOf ?? null, learned: r?.learned ?? null, dexPaid: r?.dexPaid ?? null,
+      deployTool: coin.deployTool ?? null, copyOf: coin.copyOf ?? null,
+      label: !r ? null : r.safety.verdict === 'AVOID' ? 'DO NOT BUY' : coin.alert && r.safety.verdict === 'SAFE' && !coin.warningsSent.has('insider-dump') && !coin.warningsSent.has('dev-sell') ? 'BUY ZONE' : r.safety.verdict === 'SAFE' ? 'LOW RISK' : 'WATCH',
+      spark: coin.spark(), outcomes: r ? this.store.similarOutcomes(r.score) : null, learned: r?.learned ?? null, dexPaid: r?.dexPaid ?? null,
       events: r?.events ?? [],
       alert: coin.alert ? { ...coin.alert, peakMult: coin.alert.mcSol ? coin.peakMcSinceAlert / coin.alert.mcSol : 1 } : null,
     };

@@ -34,6 +34,13 @@ function confLine(r) {
   return c ? `🎯 Confidence ${c.label} ${c.meter} (${c.value})${c.track ? ` · similar past alerts hit 1.5x ${c.track.hitPct}% of the time` : ''}` : '';
 }
 
+function outcomesLine(r) {
+  const o = r.outcomes;
+  if (!o) return '';
+  return `📊 Coins scored ${o.scoreFrom}-${o.scoreTo} before (${o.n}): typical peak +${o.medianPeakPct.toFixed(0)}% · ${o.hit2}% reached 2x` +
+    (o.medianDropPct != null ? ` · typical drop −${o.medianDropPct.toFixed(0)}%` : '');
+}
+
 function learnedLine(r) {
   const l = r.learned;
   if (!l?.validated) return '';
@@ -69,6 +76,7 @@ export function formatAlert(coin, r, stage, { solUsd, padreTemplate } = {}) {
     `MC ${fmtMc(coin.mcSol, solUsd)} · Curve ${coin.progress.toFixed(0)}% · Age ${fmtAge(coin.ageSec())} · ${m.holders} holders`,
     esc(confLine(r)),
     esc(learnedLine(r)),
+    esc(outcomesLine(r)),
     ...xLines(r).map(esc),
     ...trendLines(r).map(esc),
     ...(r.x ? [`<a href="${r.x.url}">Open the X post</a>`] : []),
@@ -96,6 +104,7 @@ export function alertNotification(coin, r, stage, { solUsd, padreTemplate, dashb
     `${coin.name} · MC ${fmtMc(coin.mcSol, solUsd)} · Curve ${coin.progress.toFixed(0)}% · ${fmtAge(coin.ageSec())} · ${m.holders} holders`,
     confLine(r),
     learnedLine(r),
+    outcomesLine(r),
     ...xLines(r),
     ...trendLines(r),
     `🧠 Narrative ${n.score}${n.theme ? ` — ${n.theme}` : ''}${n.summary ? `: ${n.summary}` : ''}`,

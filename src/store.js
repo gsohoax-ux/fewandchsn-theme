@@ -40,6 +40,9 @@ export class Store {
       if (!pcols.has(c)) this.db.exec(`ALTER TABLE paper_trades ADD COLUMN ${c} REAL`);
     }
     if (!pcols.has('deploy_tool')) this.db.exec('ALTER TABLE paper_trades ADD COLUMN deploy_tool TEXT');
+    const scols = new Set(this.db.prepare('PRAGMA table_info(samples)').all().map((c) => c.name));
+    if (!scols.has('score')) this.db.exec('ALTER TABLE samples ADD COLUMN score INTEGER');
+    if (!scols.has('low_mc_sol')) this.db.exec('ALTER TABLE samples ADD COLUMN low_mc_sol REAL');
     if (!pcols.has('vamp')) this.db.exec('ALTER TABLE paper_trades ADD COLUMN vamp INTEGER');
     const q = (sql) => this.db.prepare(sql);
     this.s = {
@@ -53,7 +56,11 @@ export class Store {
       recentAlerts: q(`SELECT * FROM alerts ORDER BY at DESC LIMIT ?`),
       since: q(`SELECT * FROM alerts WHERE at >= ?`),
       prune: q(`DELETE FROM launches WHERE created_at < ?`),
-      addSample: q(`INSERT OR IGNORE INTO samples VALUES (?,?,?,?,?,?,0,0)`),
+      addSample: q(`INSERT OR IGNORE INTO samples (mint, stage, at, features, mc_sol, peak_mc_sol, migrated, done, score, low_mc_sol)
+                    VALUES (?,?,?,?,?,?,0,0,?,?)`),
+      setLow: q(`UPDATE samples SET low_mc_sol = MIN(COALESCE(low_mc_sol, ?), ?) WHERE mint = ? AND stage = ?`),
+      similarOutcomes: q(`SELECT mc_sol, peak_mc_sol, low_mc_sol FROM samples
+                          WHERE done = 1 AND score BETWEEN ? AND ? AND at >= ? AND mc_sol > 0 ORDER BY at DESC LIMIT 3000`),
       updSample: q(`UPDATE samples SET peak_mc_sol = MAX(peak_mc_sol, ?), migrated = MAX(migrated, ?), done = MAX(done, ?)
                     WHERE mint = ? AND stage = ?`),
       doneSamples: q(`SELECT * FROM samples WHERE done = 1 ORDER BY at DESC LIMIT ?`),
@@ -129,7 +136,37 @@ export class Store {
   setKv(k, v) { this.s.setKv.run(k, JSON.stringify(v)); }
 
   // ---- learning data ----
-  addSample(mint, stage, at, features, mcSol) { this.s.addSample.run(mint, stage, at, JSON.stringify(features), mcSol, mcSol); }
+  addSample(mint, stage, at, features, mcSol, score = null) {
+    this.s.addSample.run(mint, stage, at, JSON.stringify(features), mcSol, mcSol, score, mcSol);
+  }
+  setSampleLow(mint, stage, lowMcSol) { this.s.setLow.run(lowMcSol, lowMcSol, mint, stage); }
+
+  /** What happened to past coins with a similar score (needs enough finished coins to mean anything). */
+  similarOutcomes(score, sinceMs = Date.now() - 14 * 86400_000, minN = 30) {
+    // cached for a minute per score: the dashboard asks for many coins every few seconds
+    this.outcomeCache ??= new Map();
+    const key = `${score}|${minN}`;
+    const hit = this.outcomeCache.get(key);
+    if (hit && Date.now() - hit.at < 60_000) return hit.val;
+    const val = this.#similarOutcomes(score, sinceMs, minN);
+    this.outcomeCache.set(key, { at: Date.now(), val });
+    return val;
+  }
+
+  #similarOutcomes(score, sinceMs, minN) {
+    const rows = this.s.similarOutcomes.all(score - 5, score + 5, sinceMs);
+    if (rows.length < minN) return null;
+    const med = (a) => { const s = [...a].sort((x, y) => x - y); return s[Math.floor(s.length / 2)]; };
+    const peaks = rows.map((r) => r.peak_mc_sol / r.mc_sol);
+    const drops = rows.filter((r) => r.low_mc_sol != null).map((r) => 1 - r.low_mc_sol / r.mc_sol);
+    return {
+      n: rows.length, scoreFrom: score - 5, scoreTo: score + 5,
+      medianPeakPct: (med(peaks) - 1) * 100,
+      hit1_5: Math.round((peaks.filter((p) => p >= 1.5).length / rows.length) * 100),
+      hit2: Math.round((peaks.filter((p) => p >= 2).length / rows.length) * 100),
+      medianDropPct: drops.length >= minN ? med(drops) * 100 : null,
+    };
+  }
   updateSample(mint, stage, peakMcSol, migrated, done) { this.s.updSample.run(peakMcSol, migrated ? 1 : 0, done ? 1 : 0, mint, stage); }
   doneSamples(limit = 20000) { return this.s.doneSamples.all(limit); }
   /** Samples whose outcome window has passed (e.g. lost in a restart) count as finished. */

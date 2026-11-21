@@ -159,6 +159,22 @@ export class Coin {
       pump: `https://pump.fun/coin/${this.mint}`,
       dexscreener: `https://dexscreener.com/solana/${this.mint}`,
       padre: padreTemplate ? padreTemplate.replace('{mint}', this.mint) : '',
+      solscan: `https://solscan.io/token/${this.mint}`,
+      rugcheck: `https://rugcheck.xyz/tokens/${this.mint}`,
     };
+  }
+
+  /** Market cap over the coin's life (or the last `windowMs`), sampled to `points` values, for a mini chart. */
+  spark(points = 24, windowMs = 60 * 60_000, now = Date.now()) {
+    if (!this.trades.length) return [];
+    const from = Math.max(this.createdAt, now - windowMs);
+    const out = [];
+    let i = 0, mc = this.startMcSol || this.trades[0].mcSol;
+    for (let k = 0; k < points; k++) {
+      const t = from + ((now - from) * (k + 1)) / points;
+      while (i < this.trades.length && this.trades[i].ts <= t) mc = this.trades[i++].mcSol;
+      out.push(+mc.toFixed(2));
+    }
+    return out;
   }
 }
