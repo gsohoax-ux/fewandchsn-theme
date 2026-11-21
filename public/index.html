@@ -286,7 +286,7 @@ function render() {
     ['🔍', '#1e3a5f', 'Scout', `${pl.launches ?? 0} launches seen`, `${pl.dead ?? 0} died early`],
     ['🛡', '#4a2d12', 'Filter', lastTxt('FILTER', 'nothing killed yet'), `${pl.filtered ?? 0} killed · ${killedPct}%`],
     ['🧠', '#2e2456', 'Analyst', lastTxt('ANALYST', 'scoring survivors'), `${pl.scored ?? 0} scored`],
-    ['🔔', '#143d27', 'Alerts', lastTxt('ALERT', 'nothing passed yet'), `${pl.alerts ?? 0} sent`],
+    ['🔔', '#143d27', 'Alerts', lastTxt('ALERT', `alert bar now ${s.alertMinScore}${s.alertAdaptive ? ' (auto)' : ''}`), `${pl.alerts ?? 0} sent · bar ${s.alertMinScore}`],
     ['⚡', '#123d38', 'Executor', state.paper ? lastTxt('EXECUTOR', 'paper mode · waiting') : 'off', state.paper ? `${pl.paperTrades ?? 0} paper trades` : ''],
     ['📉', '#3a1f4a', 'Risk', state.paper ? lastTxt('RISK', 'no open risk') : 'off', state.paper ? `stop −${state.paper.rules.stopPct}%` : ''],
   ];

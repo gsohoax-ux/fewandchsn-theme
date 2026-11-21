@@ -117,6 +117,16 @@ It answers *"how much should I trust this score?"*, not *"will it go up?"*:
 
 Tap a coin on the dashboard to see exactly why its confidence is what it is.
 
+### 🔎 Finding the best coins every day
+
+- **Adaptive alert bar:** instead of a fixed score, the bot alerts the **top clean coins of the current
+  market**, aiming for about `ALERT_TARGET_PER_DAY` (15) alerts a day, never below `ALERT_FLOOR` (58)
+  and never above `ALERT_CEILING` (80). It uses the fixed `ALERT_MIN_SCORE` until about 30 coins have
+  been scored. The Desk shows the current bar. Set `ALERT_TARGET_PER_DAY=0` to use the fixed bar.
+- **🔎 Best coins right now:** every `TOP_PICKS_EVERY_MIN` (60) minutes your phone gets the top 3 SAFE
+  live coins with score, confidence, market cap and a tap-to-open link, so quiet stretches still show
+  what's worth a look. `0` turns it off.
+
 ### 🆕 New Pairs and 🏁 Final Stretch
 
 The dashboard **Board** splits live coins like Padre/Axiom do:

@@ -99,7 +99,13 @@ export class PaperTrader {
     if (this.daily && !this.day) return this.#skip(coin, 'waiting for the SOL price to load today\'s budget');
     if (this.daily && this.cfg.paperStopAtLow && this.lowAlerted) return this.#skip(coin, `budget under $${this.cfg.paperLowUsd} - done for today`);
     if (this.positions.size >= this.cfg.paperMaxOpen) return this.#skip(coin, `max ${this.cfg.paperMaxOpen} open positions`);
-    const size = Math.min(this.cash, this.equity(coins) * (this.cfg.paperSizePct / 100));
+    let size = Math.min(this.cash, this.equity(coins) * (this.cfg.paperSizePct / 100));
+    // Network fees are fixed per trade: if the normal size is too small, use the smallest size that
+    // keeps them under the limit (when there's enough cash) instead of skipping the trade
+    if (this.cfg.paperMaxFixedCostPct) {
+      const minTicket = (2 * this.cfg.paperTxFeeSol) / (this.cfg.paperMaxFixedCostPct / 100);
+      if (size < minTicket && this.cash >= minTicket) size = minTicket;
+    }
     if (size < this.cfg.paperTxFeeSol * 5) return this.#skip(coin, 'not enough paper cash');
     // Network fees are fixed per transaction: on tiny trades they eat the edge, so skip those
     const fixedPct = ((2 * this.cfg.paperTxFeeSol) / size) * 100;

@@ -29,6 +29,8 @@ export class Engine {
     this.kills = new Map();  // rejection reason -> number of coins
     this.pipeline = { scored: 0, filtered: 0, lowScore: 0, dead: 0 };
     this.regimeLog = { launches: [], grads: [] }; // minute buckets for the 24h graduation rate
+    this.scoreLog = [];      // [time, score] of clean coins' first scores, for the adaptive alert bar
+    this.lastPicks = { at: Date.now(), key: '' };
     this.xwatch?.on('posts', () => this.#rematchAll());
     this.trends?.on('topics', () => { for (const c of this.coins.values()) c.trendMatch = this.#trendMatch(c); });
   }
@@ -118,7 +120,36 @@ export class Engine {
     return { state, launches, grads, rate };
   }
 
-  alertBar() { return this.cfg.alertMinScore + (this.regime().state === 'cold' ? this.cfg.coldScoreBump : 0); }
+  /**
+   * The score a coin needs to alert. Adaptive mode aims for ALERT_TARGET_PER_DAY alerts by taking the
+   * matching top slice of recently scored clean coins - so quiet days still surface the best coins -
+   * kept between ALERT_FLOOR and ALERT_CEILING. Falls back to the fixed bar until there is enough data.
+   */
+  alertBar(now = Date.now()) {
+    const cfg = this.cfg;
+    const fixed = cfg.alertMinScore + (this.regime().state === 'cold' ? cfg.coldScoreBump : 0);
+    if (!cfg.alertTargetPerDay) return fixed;
+    if (this.barCache && now - this.barCache.at < 60_000) return this.barCache.bar;
+    const recent = this.scoreLog.filter(([t]) => now - t < 6 * 3600_000);
+    let bar = fixed;
+    if (recent.length >= 30) {
+      const hours = Math.max(0.5, (now - recent[0][0]) / 3600_000);
+      const share = Math.min(1, cfg.alertTargetPerDay / 24 / (recent.length / hours));
+      const sorted = recent.map(([, s]) => s).sort((a, b) => b - a);
+      bar = sorted[Math.min(sorted.length - 1, Math.max(0, Math.ceil(share * sorted.length) - 1))];
+    }
+    bar = Math.max(cfg.alertFloor, Math.min(cfg.alertCeiling, bar));
+    this.barCache = { at: now, bar, adaptive: recent.length >= 30 };
+    return bar;
+  }
+
+  /** Best SAFE live coins right now (for the hourly phone digest and the dashboard). */
+  topPicks(limit = 3, now = Date.now()) {
+    return [...this.coins.values()]
+      .filter((c) => c.result && c.result.safety.verdict === 'SAFE' && !c.migrated && c.ageSec(now) < 2 * 3600 &&
+        c.result.score >= this.cfg.alertFloor && now - c.lastEvalAt < 30 * 60_000)
+      .sort((a, b) => b.result.score - a.result.score).slice(0, limit);
+  }
 
   logEvent(agent, coin, text, level = '') {
     this.events.push({ at: Date.now(), agent, symbol: coin?.symbol ?? '', mint: coin?.mint ?? '', text, level });
@@ -322,6 +353,17 @@ export class Engine {
   tick(now = Date.now()) {
     const cfg = this.cfg;
     this.paper?.tick(this.coins, now);
+    // Hourly digest of the best SAFE coins, so quiet stretches still show what's worth a look
+    if (this.cfg.topPicksEveryMin && now - this.lastPicks.at >= this.cfg.topPicksEveryMin * 60_000 && !this.paused) {
+      this.lastPicks.at = now;
+      const picks = this.topPicks();
+      const key = picks.map((c) => c.mint).join(',');
+      if (picks.length && key !== this.lastPicks.key) {
+        this.lastPicks.key = key;
+        this.notifier.picks?.(picks.map((c) => ({ symbol: c.symbol, name: c.name, mint: c.mint, score: c.result.score,
+          confidence: c.result.confidence.label, mcSol: c.mcSol, progress: c.progress, links: c.links(this.cfg.padreUrlTemplate) })), this.solUsd);
+      }
+    }
     const flush = now - (this.lastFlush ?? 0) > 60_000;
     if (flush) this.lastFlush = now;
     for (const coin of this.coins.values()) {
@@ -453,6 +495,11 @@ export class Engine {
     if (!coin.counted) {
       coin.counted = true;
       this.pipeline.scored++;
+      if (safety.verdict !== 'AVOID') {
+        this.scoreLog.push([now, score]);
+        if (this.scoreLog.length > 20_000) this.scoreLog.splice(0, 5_000);
+        while (this.scoreLog.length && now - this.scoreLog[0][0] > 6 * 3600_000) this.scoreLog.shift();
+      }
       if (safety.verdict === 'AVOID') {
         this.pipeline.filtered++;
         const bad = safety.flags.filter((f) => f.level === 'bad');
@@ -564,7 +611,8 @@ export class Engine {
       notify: this.notifier.channels,
       x: this.xwatch?.enabled ? { on: true, posts: this.xwatch.posts.size, error: this.xwatch.lastError }
         : { on: false, radar: Boolean(this.xwatch), posts: this.xwatch?.posts.size ?? 0 },
-      hotThemes: this.trendsTracker.hotThemes(), alertMinScore: this.alertBar(), regime: this.regime(),
+      hotThemes: this.trendsTracker.hotThemes(), alertMinScore: this.alertBar(), alertAdaptive: Boolean(this.barCache?.adaptive),
+      regime: this.regime(),
       learning: this.learner?.status() ?? null,
       pipeline: { launches: this.counters.launches, ...this.pipeline, alerts: this.counters.alerts,
         paperTrades: this.paper ? this.store.paperTradesSince(0).length + this.paper.positions.size : 0 },

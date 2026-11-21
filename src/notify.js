@@ -114,6 +114,19 @@ export class Notifier {
     ]);
   }
 
+  /** Hourly digest: the best SAFE coins right now. */
+  async picks(list, solUsd = 0) {
+    const mc = (sol) => (solUsd ? `$${((sol * solUsd) / 1000).toFixed(1)}k` : `${sol.toFixed(0)} SOL`);
+    const title = `${this.prefix}🔎 Best coins right now`;
+    const message = list.map((c, i) => `${i + 1}. $${c.symbol} · score ${c.score} · ${c.confidence} confidence · MC ${mc(c.mcSol)} · curve ${c.progress.toFixed(0)}%\n   ${c.mint}`).join('\n');
+    const top = list[0];
+    await Promise.all([
+      this.ntfy?.send({ title, message, priority: 3, click: top.links.padre || top.links.pump,
+        actions: list.slice(0, 3).map((c) => ({ label: `$${c.symbol}`, url: c.links.padre || c.links.pump })) }),
+      this.telegram?.send(`<b>${title}</b>\n${message.replace(/[<>&]/g, '')}`),
+    ]);
+  }
+
   async info(text) {
     await Promise.all([
       this.ntfy?.send({ title: this.prefix + 'Memecoin bot', message: text, priority: 2 }),

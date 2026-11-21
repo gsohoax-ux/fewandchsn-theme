@@ -107,7 +107,12 @@ export const config = {
 
   // Market regime: when few coins are graduating, be pickier
   coldGradPct: num('COLD_GRAD_PCT', 0.4),            // 24h graduation rate below this % = cold market
-  coldScoreBump: num('COLD_SCORE_BUMP', 5),          // extra score needed to alert in a cold market
+  coldScoreBump: num('COLD_SCORE_BUMP', 5),          // extra score needed to alert in a cold market (fixed bar only)
+  // Adaptive alert bar: alert the best clean coins of the current market instead of a fixed score
+  alertTargetPerDay: num('ALERT_TARGET_PER_DAY', 15), // aim for about this many alerts a day (0 = fixed ALERT_MIN_SCORE)
+  alertFloor: num('ALERT_FLOOR', 58),                 // never alert below this score
+  alertCeiling: num('ALERT_CEILING', 80),             // never require more than this
+  topPicksEveryMin: num('TOP_PICKS_EVERY_MIN', 60),   // phone digest of the best SAFE coins (0 = off)
 
   // Dashboard
   port: num('PORT', 8080),
