@@ -97,3 +97,21 @@ test('a restart on the same day keeps the day going', () => {
   assert.equal(t2.day, '2026-11-20');
   assert.ok(Math.abs(t2.cash - 0.15) < 1e-9);
 });
+
+test('all-time progress adds up every day, and the midnight summary includes it', () => {
+  const store = new Store(':memory:');
+  const { t, notes } = make(store);
+  const coins = new Map();
+  const day = (n) => Date.parse(`2026-11-${20 + n}T18:00:00Z`);
+  t.tick(coins, day(0));
+  t.cash = 0.2 * 1.2; t.tick(coins, day(1));   // day 1 ended $36 (+$6)
+  t.cash = 0.2 * 0.9; t.tick(coins, day(2));   // day 2 ended $27 (-$3)
+  t.cash = 0.2 * 1.1;                          // today so far $33 (+$3)
+  const a = t.allTime(coins, 150);
+  assert.equal(a.days, 3);
+  assert.ok(Math.abs(a.pnlUsd - 6) < 1e-6, `total ${a.pnlUsd}`);
+  assert.deepEqual([a.greenDays, a.redDays], [1, 1]);
+  assert.deepEqual(a.series.map((d) => +d.total.toFixed(2)), [6, 3, 6]);
+  assert.ok(a.series.at(-1).today);
+  assert.match(notes.at(-1), /All time: \+\$3\.00 over 2 days · 1 green \/ 1 red/);
+});

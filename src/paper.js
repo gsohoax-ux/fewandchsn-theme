@@ -49,9 +49,11 @@ export class PaperTrader {
       const endUsd = this.cash * solUsd;
       const startUsd = this.cfg.paperDailyUsd;
       this.days.unshift({ day: this.day, startUsd, endUsd, trades });
-      this.days = this.days.slice(0, 60);
+      this.days = this.days.slice(0, 365);
       const pct = (endUsd / startUsd - 1) * 100;
-      this.onNotify(`📄 Paper day ${this.day}: $${startUsd.toFixed(2)} → $${endUsd.toFixed(2)} (${pct >= 0 ? '+' : ''}${pct.toFixed(1)}%) · ${trades} trade${trades === 1 ? '' : 's'}`);
+      const all = this.allTime(null, solUsd);
+      this.onNotify(`📄 Paper day ${this.day}: $${startUsd.toFixed(2)} → $${endUsd.toFixed(2)} (${pct >= 0 ? '+' : ''}${pct.toFixed(1)}%) · ${trades} trade${trades === 1 ? '' : 's'}\n` +
+        `All time: ${all.pnlUsd >= 0 ? '+' : '-'}$${Math.abs(all.pnlUsd).toFixed(2)} over ${all.days} day${all.days === 1 ? '' : 's'} · ${all.greenDays} green / ${all.redDays} red · win rate ${all.winRate}%`);
     }
     this.day = key;
     this.dayOpenedAt = now;
@@ -250,6 +252,30 @@ export class PaperTrader {
       day: this.day, dayOpenedAt: this.dayOpenedAt, lowAlerted: this.lowAlerted, days: this.days });
   }
 
+  /**
+   * Progress across all days: the sum of every finished day's result plus today's so far.
+   * (Each day gets a fresh budget, so the total is the sum of daily profits and losses.)
+   */
+  allTime(coins, solUsd = this.getSolUsd()) {
+    const days = this.days.map((d) => ({ day: d.day, pnlUsd: d.endUsd - d.startUsd, trades: d.trades }));
+    if (this.daily && this.day && solUsd > 0 && coins) {
+      days.unshift({ day: this.day, pnlUsd: this.equity(coins) * solUsd - this.cfg.paperDailyUsd, trades: this.store.paperTradesSince(this.dayOpenedAt).length, today: true });
+    }
+    const closed = this.store.paperTradesSince(0).filter((t) => t.why !== 'closed by restart');
+    const wins = closed.filter((t) => t.proceeds_sol > t.cost_sol).length;
+    const done = days.filter((d) => !d.today);
+    const series = [...days].reverse();
+    let run = 0;
+    return {
+      days: days.length, pnlUsd: days.reduce((a, d) => a + d.pnlUsd, 0),
+      greenDays: done.filter((d) => d.pnlUsd > 0).length, redDays: done.filter((d) => d.pnlUsd < 0).length,
+      trades: closed.length, winRate: closed.length ? Math.round((wins / closed.length) * 100) : 0,
+      best: done.length ? Math.max(...done.map((d) => d.pnlUsd)) : 0, worst: done.length ? Math.min(...done.map((d) => d.pnlUsd)) : 0,
+      avgDay: done.length ? done.reduce((a, d) => a + d.pnlUsd, 0) / done.length : 0,
+      series: series.slice(-60).map((d) => ({ day: d.day, pnlUsd: d.pnlUsd, total: (run += d.pnlUsd), today: Boolean(d.today) })),
+    };
+  }
+
   /** All-time results grouped by when we bought (stage and curve %), so the data shows what works. */
   #byStage() {
     const groups = new Map();
@@ -292,6 +318,7 @@ export class PaperTrader {
         gradTakePct: this.cfg.paperGradTakePct, gradExitMin: this.cfg.paperGradExitMin, stallMin: this.cfg.paperStallMin,
         stallGainPct: this.cfg.paperStallGainPct, feePct: this.#feePct },
       byStage: this.#byStage(),
+      allTime: this.daily ? this.allTime(coins, solUsd) : null,
       open: [...this.positions.values()].map((p) => {
         const v = this.valueOf(p, coins.get(p.mint));
         return { mint: p.mint, symbol: p.symbol, costSol: p.costSol, valueSol: v, pnlPct: (v / p.costSol - 1) * 100,

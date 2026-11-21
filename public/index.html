@@ -222,7 +222,24 @@ function render() {
     const pts = h.map((v, i) => `${(i / Math.max(1, h.length - 1)) * 100},${66 - ((v - lo) / span) * 62}`).join(' ');
     const base = 66 - ((P.startSol - lo) / span) * 62;
     const col = P.pnlSol >= 0 ? 'var(--green)' : 'var(--red)';
-    $('paper').innerHTML = `
+    const A = P.allTime;
+    let allHtml = '';
+    if (A && A.days) {
+      const mx = Math.max(1, ...A.series.map((d) => Math.abs(d.pnlUsd)));
+      const tmin = Math.min(0, ...A.series.map((d) => d.total)), tmax = Math.max(0, ...A.series.map((d) => d.total)), tspan = tmax - tmin || 1;
+      const n = A.series.length, w = 100 / n;
+      const bars = A.series.map((d, i) => { const h = (Math.abs(d.pnlUsd) / mx) * 28;
+        return `<rect x="${i * w + w * 0.15}" width="${w * 0.7}" y="${d.pnlUsd >= 0 ? 30 - h : 30}" height="${Math.max(0.5, h)}" fill="${d.pnlUsd >= 0 ? 'var(--green)' : 'var(--red)'}" opacity="${d.today ? 0.5 : 1}"><title>${d.day}: ${d.pnlUsd >= 0 ? '+' : '-'}$${Math.abs(d.pnlUsd).toFixed(2)}${d.today ? ' (so far)' : ''}</title></rect>`; }).join('');
+      const line = A.series.map((d, i) => `${i * w + w / 2},${58 - ((d.total - tmin) / tspan) * 56}`).join(' ');
+      allHtml = `<div class="row" style="margin-bottom:6px"><span class="muted" style="font-size:12px;text-transform:uppercase;letter-spacing:.6px">All time</span>
+          <b class="${A.pnlUsd >= 0 ? 'up' : 'down'}" style="font-size:20px">${A.pnlUsd >= 0 ? '+' : '-'}$${Math.abs(A.pnlUsd).toFixed(2)}</b>
+          <span class="muted" style="font-size:12px">${A.days} day${A.days === 1 ? '' : 's'} · ${A.greenDays} green / ${A.redDays} red · ${A.trades} trades · win ${A.winRate}%${A.greenDays + A.redDays ? ` · avg day ${A.avgDay >= 0 ? '+' : '-'}$${Math.abs(A.avgDay).toFixed(2)} · best +$${A.best.toFixed(2)} · worst -$${Math.abs(A.worst).toFixed(2)}` : ''}</span></div>
+        <svg viewBox="0 0 100 60" preserveAspectRatio="none" style="height:60px"><line x1="0" x2="100" y1="30" y2="30" stroke="var(--line)" vector-effect="non-scaling-stroke"/>${bars}
+          <polyline points="${line}" fill="none" stroke="var(--accent)" stroke-width="1.5" vector-effect="non-scaling-stroke"/></svg>
+        <div class="muted" style="font-size:11px;margin-bottom:12px">Bars = each day's profit/loss (faded = today so far) · purple line = running total</div>
+        <div class="muted" style="font-size:12px;text-transform:uppercase;letter-spacing:.6px">Today</div>`;
+    }
+    $('paper').innerHTML = allHtml + `
       <div class="row"><span class="big">${usd(P.equitySol)}</span>
         <span class="${P.pnlSol >= 0 ? 'up' : 'down'}">${P.pnlSol >= 0 ? '+' : ''}${usd(P.pnlSol)} (${P.pnlPct >= 0 ? '+' : ''}${P.pnlPct.toFixed(1)}%)</span>
         <span class="muted">${(P.equitySol / P.startSol).toFixed(2)}x · ${P.daily ? `today's budget $${P.daily.budgetUsd}` : `started ${usd(P.startSol)}`}</span></div>
