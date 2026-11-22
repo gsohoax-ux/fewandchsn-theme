@@ -10,7 +10,7 @@ const group = (o, prefix) => Object.entries(o).filter(([k]) => k.startsWith(pref
 /** Which rejection reasons are mandatory safety restrictions vs adjustable preferences. */
 export function classifyReason(reason) {
   const r = String(reason).toLowerCase();
-  if (/bundle|linked|insider|sniper|dev (holds|sold|selling)|rug|mint authority|freeze|honeypot|tax|recycled|reused|avoid|top 10|holders too high|serial|scripted|fresh wallet|verified|unverified|authority|safety gate|critical/.test(r)) return 'safety (mandatory)';
+  if (/bundle|linked|insider|sniper|dev (holds|sold|selling)|rug|mint authority|freeze|honeypot|tax|recycled|reused|avoid|top 10|top n holders|holders too high|serial|scripted|fresh wallet|verified|unverified|authority|safety gate|critical/.test(r)) return 'safety (mandatory)';
   if (/stale|disconnected|no price|price is .* old|entry blocked|not reliable|could not be refreshed|liquidity unknown|insufficient|failed:|could not confirm|data/.test(r)) return 'data quality';
   if (/max .*open|exposure|entries per coin|budget|cash|daily loss|paused|limit|gap|too small|not enough paper cash|done for today/.test(r)) return 'risk limit / setting';
   if (/score below|confidence|narrative|momentum|traction|died early/.test(r)) return 'quality threshold (adjustable)';
