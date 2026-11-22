@@ -14,6 +14,7 @@ import { Learner } from './learn.js';
 import { PaperTrader } from './paper.js';
 import { TrendScanner } from './trends.js';
 import { DeepChecker } from './deepcheck.js';
+import { ManualPaper } from './manual.js';
 
 const ts = () => new Date().toISOString().slice(11, 19);
 const log = {
@@ -84,6 +85,9 @@ if (telegram.enabled) log.info(`  Telegram: ${cfg.telegramChatId ? 'on' : 'token
 
 engine.start();
 const deepcheck = new DeepChecker({ chain: cfg.demo ? null : chain, store, cfg, engine, log });
-startServer({ engine, store, cfg, deepcheck, log });
+// Coin Check & Paper Trade: your own simulated positions (no real money, no wallet)
+const manual = new ManualPaper({ store, cfg, engine, feed, chain: cfg.demo ? null : chain, log });
+manual.start();
+startServer({ engine, store, cfg, deepcheck, manual, log });
 telegram.poll();
 notifier.info(`🤖 Memecoin bot is running${cfg.demo ? ' (DEMO - fake coins)' : ''}. You'll get alerts here.`);

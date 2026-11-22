@@ -39,7 +39,7 @@ ${error ? `<p>${error}</p>` : ''}
 <input type="password" name="password" placeholder="Dashboard password" autocomplete="current-password" autofocus required>
 <button type="submit">Open dashboard</button></form></body></html>`;
 
-export function startServer({ engine, store, cfg, deepcheck = null, log = console }) {
+export function startServer({ engine, store, cfg, deepcheck = null, manual = null, log = console }) {
   const token = cfg.dashboardPassword
     ? createHmac('sha256', cfg.dashboardPassword).update('memecoin-bot-session-v1').digest('hex') : '';
   const same = (a, b) => { const x = Buffer.from(a), y = Buffer.from(b); return x.length === y.length && timingSafeEqual(x, y); };
@@ -59,6 +59,16 @@ export function startServer({ engine, store, cfg, deepcheck = null, log = consol
     res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
     res.end(JSON.stringify(data));
   };
+  const fail = (res, e, status = 400) => {
+    res.writeHead(status, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+    res.end(JSON.stringify({ error: e?.message ?? String(e) }));
+  };
+  const readJson = (req) => new Promise((resolve, reject) => {
+    let body = '';
+    req.on('data', (c) => { body += c; if (body.length > 8192) { reject(new Error('Request too large')); req.destroy(); } });
+    req.on('end', () => { try { resolve(body ? JSON.parse(body) : {}); } catch { reject(new Error('Bad JSON')); } });
+    req.on('error', reject);
+  });
   const html = (res, body, status = 200, headers = {}) => {
     res.writeHead(status, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store', ...headers });
     res.end(body);
@@ -110,11 +120,24 @@ export function startServer({ engine, store, cfg, deepcheck = null, log = consol
     }
     if (url.pathname === '/' || url.pathname === '/index.html') return html(res, file('index.html'));
     if (url.pathname === '/api/check' && deepcheck) {
-      const mint = url.searchParams.get('mint') ?? '';
-      deepcheck.check(mint).then((r) => json(res, r)).catch((e) => {
-        res.writeHead(400, { 'content-type': 'application/json' });
-        res.end(JSON.stringify({ error: e.message }));
-      });
+      // accepts a mint (?mint=) or anything pasted (?q=): an address or a pump.fun / DexScreener / Padre / GMGN link
+      const q = url.searchParams.get('q');
+      const mintP = q != null && manual ? manual.resolve(q) : Promise.resolve(url.searchParams.get('mint') ?? q ?? '');
+      mintP.then((mint) => deepcheck.check(mint)).then((r) => json(res, r)).catch((e) => fail(res, e));
+      return;
+    }
+    if (url.pathname === '/api/resolve' && manual) {
+      manual.resolve(url.searchParams.get('q') ?? '').then((mint) => json(res, { mint })).catch((e) => fail(res, e));
+      return;
+    }
+    if (url.pathname === '/api/manual' && manual && req.method === 'GET') return json(res, manual.view());
+    if (url.pathname === '/api/manual/open' && manual && req.method === 'POST') {
+      readJson(req).then((b) => manual.openPosition({ mint: String(b.mint ?? ''), budgetUsd: b.budgetUsd }))
+        .then((p) => json(res, p)).catch((e) => fail(res, e));
+      return;
+    }
+    if (url.pathname === '/api/manual/close' && manual && req.method === 'POST') {
+      readJson(req).then((b) => json(res, manual.closePosition(String(b.id ?? '')))).catch((e) => fail(res, e));
       return;
     }
     if (url.pathname === '/api/state') {

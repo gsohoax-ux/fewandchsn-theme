@@ -180,6 +180,27 @@ multiple as a likely outcome.
 Needs the Helius key for the on-chain parts. Results are cached for 2 minutes. A clean check lowers the risk
 but can't rule out a rug, since devs can still sell.
 
+### 🧪 Coin Check & Paper Trade (your own simulated trades)
+
+The dashboard has two tabs. **📊 Dashboard** is everything the bot already did, unchanged. **🧪 Coin Check & Paper
+Trade** is for coins you pick yourself:
+
+1. **Check a coin.** Paste a contract address **or a link** (pump.fun, DexScreener, Padre, Axiom, GMGN, Birdeye,
+   Solscan). Links to a trading pair are looked up to find the coin. The full deep check runs, and the
+   red flags are shown first: **ownership concentration**, **mint / freeze authority**, **liquidity** and
+   **honeypot & taxes**. Every other check is listed underneath. It is **not a guarantee of safety**.
+2. **Start a paper position.** Choose a budget ($10 / $30 / $50 / $100 or any amount). Before you start, it shows
+   liquidity vs market cap (low = HIGH RISK), the slippage your size would pay, honeypot and tax signs,
+   concentrated holdings, and how much of a paper gain a thin pool would let you cash out.
+3. **Watch it live.** Every open position shows price and market cap now vs entry, **value if sold now** and
+   **gain / loss in $ and %**. The page refreshes every 2 seconds. Pump.fun coins update on every trade from the
+   live feed, and other coins update from DexScreener every 10 seconds. Close a position anytime to lock in the
+   simulated result. Positions survive restarts.
+
+"Value if sold now" is honest: it takes off trading fees (Pump.fun + terminal), network fees, and the slippage
+selling your whole position would cause in today's pool. A new position therefore starts a few % red. That's the
+real round-trip cost. **No real money and no wallet are involved.** Nothing is ever bought or sold.
+
 ### 🔎 Finding the best coins every day
 
 - **Adaptive alert bar:** instead of a fixed score, the bot alerts the **top clean coins of the current
@@ -415,7 +436,9 @@ src/engine.js     when to score, alerts, follow-up warnings
 src/confidence.js confidence meter
 src/xwatch.js     X watcher: viral/meme-able posts, matching coins to posts
 src/notify.js     phone alerts (ntfy) + optional Telegram (src/telegram.js)
-src/server.js     dashboard server; public/index.html is the page
+src/server.js     dashboard server; public/index.html is the page (two tabs)
+src/deepcheck.js  deep check of any coin
+src/manual.js     Coin Check & Paper Trade: your simulated positions, live prices
 src/store.js      SQLite history (dev launches, socials, alert outcomes)
 ```
 

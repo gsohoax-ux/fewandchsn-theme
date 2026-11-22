@@ -130,6 +130,44 @@
   .vd-SAFE { background: var(--green); color: #04120a; } .vd-CAUTION { background: var(--yellow); color: #1a1500; } .vd-AVOID { background: var(--red); color: #fff; } .vd-UNVERIFIED { background: #5b6275; color: #fff; }
   .ck { list-style: none; margin: 0; padding: 0; } .ck li { padding: 4px 0; }
   .disclaimer { color: var(--muted); font-size: 12px; padding: 0 20px 20px; text-align: center; }
+  /* ---- tabs + Coin Check & Paper Trade */
+  .tabs { display: flex; gap: 4px; padding: 8px 20px 0; background: var(--panel); border-bottom: 1px solid var(--line); position: sticky; top: var(--hdr, 0px); z-index: 4; overflow-x: auto; }
+  .tab { background: none; border: 0; border-bottom: 2px solid transparent; color: var(--muted); font: inherit; font-weight: 600; padding: 9px 12px 10px; cursor: pointer; white-space: nowrap; }
+  .tab[aria-selected="true"] { color: var(--text); border-bottom-color: var(--accent); }
+  .tab .cnt { font-size: 11px; background: var(--panel2); border: 1px solid var(--line); border-radius: 99px; padding: 0 7px; margin-left: 6px; color: var(--muted); }
+  [hidden] { display: none !important; }
+  .trade { max-width: 1100px; margin: 0 auto; padding: 16px 20px; display: grid; gap: 16px; }
+  @media (max-width: 700px) { .trade { padding: 12px 16px; } .tabs { padding: 6px 12px 0; } }
+  .pad { padding: 14px; }
+  .note { font-size: 12px; color: var(--muted); }
+  .warnbox { border: 1px solid #5a4d1f; background: #1d1a0d; color: #f3dd8a; border-radius: 10px; padding: 10px 12px; font-size: 13px; }
+  .warnbox b { color: #ffe680; }
+  .simbox { border: 1px solid #2c3550; background: #111827; color: #b9c6ea; border-radius: 10px; padding: 8px 12px; font-size: 12px; }
+  .keyflags { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; margin: 12px 0; }
+  .kf { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; background: var(--panel2); }
+  .kf h4 { margin: 0 0 6px; font-size: 13px; display: flex; gap: 6px; align-items: center; }
+  .kf ul { list-style: none; margin: 0; padding: 0; font-size: 12.5px; } .kf li { padding: 2px 0; }
+  .kf.l-bad-b { border-color: #6b2a2a; } .kf.l-warn-b { border-color: #5a4d1f; } .kf.l-ok-b { border-color: #1f5a3a; }
+  details.all { margin-top: 10px; } details.all summary { cursor: pointer; color: var(--blue); font-size: 13px; }
+  .budget { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 10px 0; }
+  .budget .presets button { font: inherit; font-size: 13px; background: var(--panel2); color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 7px 11px; cursor: pointer; margin-right: 4px; }
+  .budget .presets button.sel { border-color: var(--accent); color: #fff; }
+  .budget label { display: flex; align-items: center; gap: 4px; background: var(--panel2); border: 1px solid var(--line); border-radius: 8px; padding: 0 10px; }
+  .budget input { width: 90px; background: none; border: 0; color: var(--text); font: inherit; font-size: 15px; padding: 8px 0; outline: none; }
+  .btn { background: var(--accent); color: #fff; border: 0; border-radius: 8px; padding: 10px 16px; font: inherit; font-weight: 700; cursor: pointer; }
+  .btn:disabled { opacity: .55; cursor: not-allowed; } .btn.ghost { background: var(--panel2); border: 1px solid var(--line); color: var(--text); font-weight: 600; padding: 6px 11px; }
+  .totals { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; padding: 14px; border-bottom: 1px solid var(--line); }
+  .totals div small { display: block; color: var(--muted); font-size: 11px; } .totals div b { font-size: 20px; font-variant-numeric: tabular-nums; }
+  .pos { list-style: none; margin: 0; padding: 0; }
+  .pos li { display: grid; grid-template-columns: minmax(150px, 1.3fr) repeat(4, minmax(90px, 1fr)) 110px auto; gap: 6px 14px; align-items: center; padding: 12px 14px; border-bottom: 1px solid var(--line); font-variant-numeric: tabular-nums; }
+  .pos li > div small { display: block; color: var(--muted); font-size: 11px; }
+  .pos .pnl b { font-size: 16px; }
+  @media (max-width: 800px) { .pos li { grid-template-columns: 1fr 1fr; } .pos li .wide { grid-column: 1 / -1; } }
+  .flash-up { animation: fu .8s; } .flash-down { animation: fd .8s; }
+  @keyframes fu { from { background: rgba(46,204,113,.18); } to { background: transparent; } }
+  @keyframes fd { from { background: rgba(255,92,92,.18); } to { background: transparent; } }
+  .live { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--green); margin-right: 5px; animation: pulse 1.6s infinite; }
+  @keyframes pulse { 50% { opacity: .3; } }
   @media (max-width: 700px) {
     .hide-sm { display: none; } td, th { padding: 8px 6px; }
     .stats { grid-template-columns: repeat(4, 1fr); gap: 6px; margin-bottom: 10px; }
@@ -144,6 +182,11 @@
   <div class="pills" id="pills"></div>
   <a class="logout" href="/logout">Log out</a>
 </header>
+<nav class="tabs" role="tablist">
+  <button class="tab" role="tab" id="tabbtn-dash" data-tab="dash" aria-selected="true">📊 Dashboard</button>
+  <button class="tab" role="tab" id="tabbtn-trade" data-tab="trade" aria-selected="false">🧪 Coin Check &amp; Paper Trade<span class="cnt" id="poscnt" hidden></span></button>
+</nav>
+<div id="tab-dash" role="tabpanel">
 <div class="ticker" id="ticker"></div>
 <main>
   <section>
@@ -178,6 +221,34 @@
   </aside>
 </main>
 <p class="disclaimer">Scores are filters, not predictions. Meme coins are extremely risky — only trade what you can afford to lose.</p>
+</div>
+
+<div id="tab-trade" role="tabpanel" hidden>
+<div class="trade">
+  <div class="simbox">🧪 <b>Simulation only.</b> No real money, no wallet connection, nothing is bought or sold. Positions here are numbers the bot tracks against live prices.</div>
+
+  <div class="card"><h2><span>1 · Check a coin</span><span class="muted">address or link</span></h2>
+    <form class="dc" id="tcform"><input id="tcq" placeholder="Paste a contract address or a pump.fun / DexScreener / Padre / GMGN link…" autocomplete="off" spellcheck="false"><button id="tcbtn">Run safety check</button></form>
+    <div id="tcout" class="pad" style="padding-top:0"><p class="note">The check looks at holder concentration, mint and freeze authority, liquidity vs market cap, slippage, honeypot and tax signs, launch bundles and linked wallets. It takes 10–30 seconds.</p></div>
+  </div>
+
+  <div class="card" id="tradecard" hidden><h2><span>2 · Start a paper position</span><span class="muted" id="tcsym"></span></h2>
+    <div class="pad">
+      <div class="budget"><span class="presets" id="presets"><button type="button" data-b="10">$10</button><button type="button" data-b="30">$30</button><button type="button" data-b="50" class="sel">$50</button><button type="button" data-b="100">$100</button></span>
+        <label>$<input id="budget" type="number" min="1" max="1000000" step="1" value="50" inputmode="decimal" aria-label="Paper budget in dollars"></label>
+        <button class="btn" id="openbtn">Start paper position</button></div>
+      <div id="pretrade"></div>
+    </div>
+  </div>
+
+  <div class="card"><h2><span><span class="live"></span>3 · Your paper positions</span><span class="muted" id="posupd"></span></h2>
+    <div class="totals" id="totals"></div>
+    <ul class="pos" id="positions"><li class="empty" style="display:block">No open paper positions yet. Check a coin above, then start one.</li></ul>
+    <div id="closedwrap"></div>
+  </div>
+  <p class="note" style="text-align:center">"Value if sold now" takes off trading fees and the slippage your position size would cause in the current pool, so it can be lower than price × tokens. Paper gains can't be cashed out in a thin pool. Past moves don't predict future ones.</p>
+</div>
+</div>
 
 <dialog id="dlg"><div class="dlg-h" id="dlg-h"></div><div class="dlg-b" id="dlg-b"></div></dialog>
 
@@ -503,6 +574,173 @@ async function refresh() {
 }
 refresh(); setInterval(refresh, 3000);
 document.addEventListener('visibilitychange', () => { if (!document.hidden) refresh(); }); // instant update when the app is reopened
+// ================= Coin Check & Paper Trade =================
+const usd = (x, d) => x == null || !isFinite(x) ? '—' : Math.abs(x) >= 1e6 ? `$${(x / 1e6).toFixed(2)}M` : Math.abs(x) >= 1e4 ? `$${(x / 1e3).toFixed(1)}k` : `$${x.toFixed(d ?? (Math.abs(x) < 10 ? 2 : 0))}`;
+const signed = (x) => (x >= 0 ? '+' : '−') + usd(Math.abs(x), 2);
+const pct = (x) => x == null || !isFinite(x) ? '—' : `${x >= 0 ? '+' : '−'}${Math.abs(x).toFixed(Math.abs(x) < 10 ? 2 : 1)}%`;
+const price = (p) => { if (!(p > 0)) return '—'; if (p >= 1) return '$' + p.toFixed(4); const z = Math.max(0, -Math.floor(Math.log10(p)) - 1); return '$' + p.toFixed(Math.min(z + 4, 14)); };
+const cls = (x) => x > 0 ? 'up' : x < 0 ? 'down' : 'muted';
+const worst = (cs) => cs.some((c) => c.level === 'bad') ? 'bad' : cs.some((c) => c.level === 'warn') ? 'warn' : cs.some((c) => c.level === 'unknown') ? 'unknown' : 'ok';
+let checked = null; // last safety check result
+
+// tabs (remembered per device)
+function showTab(t) {
+  for (const b of document.querySelectorAll('.tab')) b.setAttribute('aria-selected', String(b.dataset.tab === t));
+  $('tab-dash').hidden = t !== 'dash'; $('tab-trade').hidden = t !== 'trade';
+  try { localStorage.setItem('mb_tab', t); } catch {}
+  if (t === 'trade') loadManual();
+}
+for (const b of document.querySelectorAll('.tab')) b.addEventListener('click', () => showTab(b.dataset.tab));
+const setHdr = () => document.documentElement.style.setProperty('--hdr', document.querySelector('header').offsetHeight + 'px');
+setHdr(); addEventListener('resize', setHdr);
+try { if (localStorage.getItem('mb_tab') === 'trade') showTab('trade'); } catch {}
+
+// 1) safety check, red flags up front
+const KEY = [
+  ['👥 Ownership concentration', ['Holders', 'Wallet links', 'Launch']],
+  ['🔑 Mint / freeze authority', ['Authorities']],
+  ['💧 Liquidity', ['Liquidity']],
+  ['🍯 Honeypot & taxes', ['Honeypot & tax']],
+];
+function renderTradeCheck(r) {
+  const used = new Set(KEY.flatMap(([, g]) => g));
+  const box = ([title, groups]) => {
+    const cs = r.checks.filter((c) => groups.includes(c.group));
+    const w = cs.length ? worst(cs) : 'unknown';
+    return `<div class="kf l-${w}-b"><h4>${ICONS[w]} ${title}</h4><ul>${cs.length ? cs.map((c) => `<li>${ICONS[c.level] ?? ''} ${esc(c.text)}</li>`).join('') : '<li class="muted">❔ Could not check</li>'}</ul></div>`;
+  };
+  const rest = r.checks.filter((c) => !used.has(c.group));
+  const restGroups = [...new Set(rest.map((c) => c.group))];
+  const m = r.market;
+  $('tcout').innerHTML = `
+    <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap"><span class="vd vd-${r.verdict}">${r.verdict}</span>
+      <div><div class="tick">${r.symbol ? '$' + esc(r.symbol) : 'Unknown token'}${r.name ? ' · ' + esc(r.name) : ''}</div><code>${esc(r.mint)}</code></div></div>
+    <p style="margin:10px 0 0"><b>Safety ${r.score}/100</b> · <span class="down">${r.bad} red flag${r.bad === 1 ? '' : 's'}</span> · <span style="color:var(--yellow)">${r.warn} warning${r.warn === 1 ? '' : 's'}</span>${r.unknown ? ` · <span class="muted">${r.unknown} not checked</span>` : ''}
+      ${m ? `<br><span class="muted">${m.onCurve ? 'On the Pump.fun bonding curve' : 'Trading on ' + esc(m.dex)} · MC ${usd(m.mcUsd)}${m.onCurve ? '' : ` · pool liquidity ${usd(m.liqUsd)}`}</span>` : ''}</p>
+    <div class="warnbox" style="margin-top:10px">⚠️ <b>Not a guarantee of safety.</b> This check lowers risk but can't rule out a rug pull: developers and large holders can still sell, and some risks don't show up on-chain until they happen.${r.verdict === 'UNVERIFIED' ? ' <b>UNVERIFIED:</b> key on-chain checks couldn\'t run, so this coin is not confirmed safe.' : ''}</div>
+    <div class="keyflags">${KEY.map(box).join('')}</div>
+    <div class="links">${r.links?.padre ? `<a target="_blank" rel="noopener" href="${esc(r.links.padre)}">Padre</a>` : ''}<a target="_blank" rel="noopener" href="${esc(r.links?.pump)}">pump.fun</a><a target="_blank" rel="noopener" href="${esc(r.links?.dexscreener)}">DexScreener</a><a target="_blank" rel="noopener" href="${esc(r.links?.solscan)}">Solscan</a><a target="_blank" rel="noopener" href="${esc(r.links?.rugcheck)}">RugCheck</a><button class="copy" data-copy="${esc(r.mint)}">Copy CA</button></div>
+    <details class="all"><summary>All other checks (${rest.length})</summary>
+      ${restGroups.map((g) => `<h3 class="muted" style="font-size:12px;text-transform:uppercase;margin:12px 0 4px">${esc(g)}</h3><ul class="ck">${rest.filter((c) => c.group === g).map((c) => `<li>${ICONS[c.level] ?? ''} ${esc(c.text)}</li>`).join('')}</ul>`).join('')}
+      ${r.notes?.length ? `<h3 class="muted" style="font-size:12px;text-transform:uppercase;margin:12px 0 4px">Couldn't check</h3><ul class="ck">${r.notes.map((n) => `<li class="muted">❔ ${esc(n)}</li>`).join('')}</ul>` : ''}
+    </details>`;
+  $('tradecard').hidden = false;
+  $('tcsym').textContent = r.symbol ? '$' + r.symbol : r.mint.slice(0, 6) + '…';
+  renderPretrade();
+}
+
+// before-trade read for the chosen budget: liquidity vs MC, slippage, honeypot/tax, concentration, cash-out
+function renderPretrade() {
+  const r = checked; if (!r) return;
+  const b = Number($('budget').value) || 0;
+  const L = r.liquidity, lines = [];
+  const lvl = (k) => worst(r.checks.filter((c) => c.group === k));
+  if (L) {
+    const thin = L.ratioPct != null && L.ratioPct < (L.onCurve ? 2 : 5);
+    lines.push(`${thin ? '⛔ <b>HIGH RISK:</b>' : L.level === 'warn' ? '⚠️' : '✅'} ${L.onCurve ? 'Curve holds' : 'Pool liquidity'} ${usd(L.realLiqUsd)}${L.ratioPct != null ? ` = ${L.ratioPct.toFixed(1)}% of market cap${thin ? ' (thin liquidity)' : ''}` : ''}.`);
+    if (L.depthUsd > 0 && b > 0) {
+      const avg = (b / L.depthUsd) * 100, move = ((1 + b / L.depthUsd) ** 2 - 1) * 100;
+      lines.push(`${avg > 15 ? '⛔' : avg > 5 ? '⚠️' : '✅'} Slippage: a ${usd(b)} buy pays ~${avg.toFixed(1)}% and moves the price ~${move.toFixed(1)}% (order size vs pool depth ${usd(L.depthUsd)}).`);
+      const v = b * 5, got = (v * L.depthUsd) / (L.depthUsd + v);
+      lines.push(`💸 Paper gains can't be cashed out in a thin pool: even if this position were worth ${usd(v)} on paper, selling it into today's pool would bring ~${usd(got)} (−${((1 - got / v) * 100).toFixed(0)}%). That's a stress test of the exit, not a forecast.`);
+    } else if (L.depthUsd === 0) lines.push('⛔ <b>No liquidity pool found:</b> a real buy or sale would not fill.');
+  } else lines.push('❔ Liquidity and slippage couldn\'t be measured for this coin, so the simulation can\'t price your exit accurately.');
+  const hp = lvl('Honeypot & tax');
+  lines.push(hp === 'bad' ? '⛔ <b>Honeypot / tax red flag</b> — see the Honeypot & taxes box above. You may not be able to sell.' : hp === 'warn' ? '⚠️ Possible honeypot or tax issue — see the Honeypot & taxes box.' : hp === 'unknown' ? '❔ Honeypot and tax signs could not be fully checked.' : '✅ No honeypot or buy/sell tax signs found.');
+  const hold = worst(r.checks.filter((c) => ['Holders', 'Wallet links', 'Launch'].includes(c.group)));
+  lines.push(hold === 'bad' ? '⛔ <b>Concentrated holdings:</b> a few wallets (or linked wallets) could dump on you.' : hold === 'warn' ? '⚠️ Holdings are somewhat concentrated.' : hold === 'unknown' ? '❔ Holder concentration could not be fully checked.' : '✅ Holdings look spread out.');
+  $('pretrade').innerHTML = `<ul class="ck" style="font-size:13px">${lines.map((l) => `<li>${l}</li>`).join('')}</ul>
+    <p class="note">Entry is simulated at the live price minus trading fees (~2.25%), network fees, and slippage for your size. Nothing here is a prediction of profit.</p>`;
+  $('openbtn').disabled = !(b >= 1) || (L && L.depthUsd === 0);
+}
+
+$('tcform').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const q = $('tcq').value.trim(); if (!q) return;
+  $('tcbtn').disabled = true; $('tcbtn').textContent = 'Checking…';
+  $('tcout').innerHTML = '<p class="muted">Finding the coin, reading the launch block, tracing wallet funding, checking holders, authorities, liquidity and RugCheck… (10–30 s)</p>';
+  try {
+    const r = await fetch('/api/check?q=' + encodeURIComponent(q), { cache: 'no-store' });
+    if (r.status === 401) return location.reload();
+    const j = await r.json();
+    if (j.error) { checked = null; $('tradecard').hidden = true; $('tcout').innerHTML = `<p class="down">${esc(j.error)}</p>`; }
+    else { checked = j; renderTradeCheck(j); }
+  } catch (err) { $('tcout').innerHTML = `<p class="down">Check failed: ${esc(err.message)}</p>`; }
+  finally { $('tcbtn').disabled = false; $('tcbtn').textContent = 'Run safety check'; }
+});
+$('presets').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-b]'); if (!b) return;
+  $('budget').value = b.dataset.b; renderPresets(); renderPretrade();
+});
+const renderPresets = () => { for (const x of $('presets').children) x.classList.toggle('sel', x.dataset.b === $('budget').value); };
+$('budget').addEventListener('input', () => { renderPresets(); renderPretrade(); });
+
+// 2) start a simulated position
+$('openbtn').addEventListener('click', async () => {
+  if (!checked) return;
+  const budgetUsd = Number($('budget').value);
+  if (checked.verdict === 'AVOID' && !confirm(`This coin was rated AVOID (${checked.bad} red flags). Start a paper position anyway, to watch what happens?`)) return;
+  $('openbtn').disabled = true; $('openbtn').textContent = 'Starting…';
+  try {
+    const r = await fetch('/api/manual/open', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ mint: checked.mint, budgetUsd }) });
+    if (r.status === 401) return location.reload();
+    const j = await r.json();
+    if (j.error) alert(j.error); else { await loadManual(); $('positions').scrollIntoView({ behavior: 'smooth', block: 'center' }); }
+  } catch (err) { alert('Could not start: ' + err.message); }
+  finally { $('openbtn').textContent = 'Start paper position'; renderPretrade(); }
+});
+
+// 3) live positions
+let manual = null; const lastPx = new Map();
+function renderManual() {
+  const v = manual; if (!v) return;
+  const t = v.totals;
+  $('poscnt').hidden = !v.open.length; $('poscnt').textContent = v.open.length;
+  $('posupd').textContent = 'updated ' + new Date().toLocaleTimeString();
+  $('totals').innerHTML = `
+    <div><small>Open positions</small><b>${v.open.length}</b></div>
+    <div><small>Paper money in</small><b>${usd(t.invested, 2)}</b></div>
+    <div><small>Value if sold now</small><b>${usd(t.value, 2)}</b></div>
+    <div><small>Open gain / loss</small><b class="${cls(t.pnlUsd)}">${v.open.length ? `${signed(t.pnlUsd)} <span style="font-size:13px">${pct(t.pnlPct)}</span>` : '—'}</b></div>
+    <div><small>Closed result (${t.closedCount})</small><b class="${cls(t.realizedUsd)}">${t.closedCount ? signed(t.realizedUsd) : '—'}</b></div>`;
+  $('positions').innerHTML = v.open.length ? v.open.map((p) => {
+    const prev = lastPx.get(p.id); lastPx.set(p.id, p.priceUsd);
+    const fl = prev == null || prev === p.priceUsd ? '' : p.priceUsd > prev ? 'flash-up' : 'flash-down';
+    const stale = Date.now() - p.lastAt > 60_000;
+    return `<li class="${fl}">
+      <div class="wide"><span class="tick">${p.symbol ? '$' + esc(p.symbol) : esc(p.mint.slice(0, 6)) + '…'}</span> <span class="nm" style="display:inline">${esc(p.name ?? '')}</span>
+        <small>${usd(p.budgetUsd, 2)} in · ${age(Math.floor((Date.now() - p.openedAt) / 1000))} ago · ${p.onCurve ? 'bonding curve' : 'DEX pool'} · ${esc(p.source)}${stale ? ' · <span style="color:var(--yellow)">price not updated for ' + age(Math.floor((Date.now() - p.lastAt) / 1000)) + '</span>' : ''}</small></div>
+      <div><small>Price</small>${price(p.priceUsd)}<small>entry ${price(p.entryPriceUsd)} · <span class="${cls(p.priceChangePct)}">${pct(p.priceChangePct)}</span></small></div>
+      <div><small>Market cap</small>${usd(p.mcUsd)}<small>entry ${usd(p.entryMcUsd)}</small></div>
+      <div><small>Value if sold now</small>${usd(p.ifSoldUsd, 2)}<small>market ${usd(p.marketUsd, 2)}${p.exitSlipPct > 0.05 ? ` · −${p.exitSlipPct.toFixed(1)}% slippage` : ''}</small></div>
+      <div class="pnl"><small>Gain / loss</small><b class="${cls(p.pnlUsd)}">${signed(p.pnlUsd)}</b><small class="${cls(p.pnlPct)}">${pct(p.pnlPct)}</small></div>
+      <div>${sparkSvg(p.history, 100, 30)}</div>
+      <div><button class="btn ghost" data-closepos="${esc(p.id)}">Close</button></div>
+    </li>`;
+  }).join('') : '<li class="empty" style="display:block">No open paper positions yet. Check a coin above, then start one.</li>';
+  $('closedwrap').innerHTML = v.closed.length ? `<h3 style="font-size:12px;text-transform:uppercase;letter-spacing:.8px;color:var(--muted);margin:0;padding:12px 14px 6px">Closed positions</h3>
+    <ul class="mini" style="padding:0 14px 12px">${v.closed.map((c) => `<li><span>${c.symbol ? '$' + esc(c.symbol) : esc(c.mint.slice(0, 6)) + '…'} <span class="muted">${usd(c.budgetUsd, 2)} → ${usd(c.exitUsd, 2)} · held ${age(Math.floor((c.closedAt - c.openedAt) / 1000))}</span></span><b class="${cls(c.pnlUsd)}">${signed(c.pnlUsd)} (${pct(c.pnlPct)})</b></li>`).join('')}</ul>` : '';
+}
+async function loadManual() {
+  try {
+    const r = await fetch('/api/manual', { cache: 'no-store' });
+    if (r.status === 401) return location.reload();
+    if (r.ok) { manual = await r.json(); renderManual(); }
+  } catch {}
+}
+document.addEventListener('click', async (e) => {
+  const b = e.target.closest('[data-closepos]'); if (!b) return;
+  if (!confirm('Close this paper position at the current "value if sold now"?')) return;
+  b.disabled = true;
+  const r = await fetch('/api/manual/close', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: b.dataset.closepos }) }).catch(() => null);
+  const j = await r?.json().catch(() => null);
+  if (j?.error) alert(j.error);
+  loadManual();
+});
+// live: every 2 s while this tab is open, every 16 s in the background (for the tab badge)
+let mtick = 0;
+setInterval(() => { mtick++; if (!document.hidden && (!$('tab-trade').hidden || mtick % 8 === 0)) loadManual(); }, 2000);
+loadManual();
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
 </script>
 </body>

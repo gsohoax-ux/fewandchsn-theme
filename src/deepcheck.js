@@ -243,6 +243,12 @@ export class DeepChecker {
     {
       const solUsd = this.engine?.solUsd ?? 0;
       const tracked = this.engine?.coins.get(mint);
+      // too new for DexScreener, but the bot is watching it live on the bonding curve
+      if (!f.market && tracked && !tracked.migrated && solUsd > 0 && tracked.mcSol > 0) {
+        f.name ||= tracked.name ?? ''; f.symbol ||= tracked.symbol ?? '';
+        f.market = { dex: 'pumpfun', onCurve: true, mcUsd: tracked.mcSol * solUsd, liqUsd: 0, vol24: 0, change1h: null,
+          buys1h: 0, sells1h: 0, ageH: tracked.createdAt ? (Date.now() - tracked.createdAt) / 3600_000 : null, url: null, source: 'live feed' };
+      }
       if (f.market) {
         f.liquidity = liquidityRead({ onCurve: f.market.onCurve, vSol: tracked && !tracked.migrated ? tracked.vSol : null,
           liqUsd: f.market.liqUsd, mcUsd: f.market.mcUsd, solUsd, orderUsd: this.cfg.checkOrderUsd ?? 50 });
