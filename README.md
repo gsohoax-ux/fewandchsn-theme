@@ -147,6 +147,29 @@ It answers *"how much should I trust this score?"*, not *"will it go up?"*:
 
 Tap a coin on the dashboard to see exactly why its confidence is what it is.
 
+### 🔍 Deep check any coin
+
+Paste any Solana token address into **Deep check a coin** at the top of the dashboard. That includes new,
+graduated and older coins, even ones the bot never saw. In 10–30 seconds you get **SAFE / CAUTION / AVOID**
+(or **UNVERIFIED** if the key checks couldn't run) with every check listed:
+
+- **Authorities:** mint authority (can more tokens be made?) and freeze authority (can your tokens be frozen?)
+- **Launch:** finds the creation transaction, every wallet that bought in the **same block** (including
+  wallets the dev paid for), how much they bought and **still hold**, snipers in the first 3 blocks, and
+  the dev's own buy
+- **Holders:** the real top 10, with the bonding curve and pools excluded (program-owned accounts are detected)
+- **Wallet links:** traces who funded the dev, launch buyers and top holders. Shared funders,
+  dev-funded wallets and fresh wallets are flagged, and exchanges are ignored.
+- **Dev:** current holdings, a brand-new wallet, past rugs and launches the bot has seen
+- **Socials:** what's linked, reused socials, quick-deploy tags
+- **Market** (DexScreener): bonding curve or DEX, market cap, liquidity vs market cap, volume, buys vs sells
+- **RugCheck** risk report as a second opinion
+- **The bot's live read**, if it's tracking the coin
+- **Couldn't check:** anything that failed is listed, so you know how solid the verdict is
+
+Needs the Helius key for the on-chain parts. Results are cached for 2 minutes. A clean check lowers the risk
+but can't rule out a rug, since devs can still sell.
+
 ### 🔎 Finding the best coins every day
 
 - **Adaptive alert bar:** instead of a fixed score, the bot alerts the **top clean coins of the current

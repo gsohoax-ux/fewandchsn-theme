@@ -63,6 +63,15 @@ export class HeliusChain {
     return data.result;
   }
 
+  /** Helius parsed ("enhanced") transactions for up to 100 signatures. */
+  async parseTransactions(signatures) {
+    if (!signatures.length) return [];
+    const url = `${this.apiUrl}/v0/transactions?api-key=${this.apiKey}`;
+    const out = await this.#fetchJson(url, { method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ transactions: signatures.slice(0, 100) }) });
+    return Array.isArray(out) ? out : [];
+  }
+
   /** Map of signature -> slot for the token's recent transactions. */
   async getSignatureSlots(mint) {
     const sigs = await this.rpc('getSignaturesForAddress', [mint, { limit: 1000 }]);

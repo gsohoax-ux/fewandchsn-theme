@@ -39,7 +39,7 @@ ${error ? `<p>${error}</p>` : ''}
 <input type="password" name="password" placeholder="Dashboard password" autocomplete="current-password" autofocus required>
 <button type="submit">Open dashboard</button></form></body></html>`;
 
-export function startServer({ engine, store, cfg, log = console }) {
+export function startServer({ engine, store, cfg, deepcheck = null, log = console }) {
   const token = cfg.dashboardPassword
     ? createHmac('sha256', cfg.dashboardPassword).update('memecoin-bot-session-v1').digest('hex') : '';
   const same = (a, b) => { const x = Buffer.from(a), y = Buffer.from(b); return x.length === y.length && timingSafeEqual(x, y); };
@@ -109,6 +109,14 @@ export function startServer({ engine, store, cfg, log = console }) {
       return res.end();
     }
     if (url.pathname === '/' || url.pathname === '/index.html') return html(res, file('index.html'));
+    if (url.pathname === '/api/check' && deepcheck) {
+      const mint = url.searchParams.get('mint') ?? '';
+      deepcheck.check(mint).then((r) => json(res, r)).catch((e) => {
+        res.writeHead(400, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ error: e.message }));
+      });
+      return;
+    }
     if (url.pathname === '/api/state') {
       return json(res, {
         status: engine.status(), coins: engine.ranked(80), xPosts: engine.xPosts(12),

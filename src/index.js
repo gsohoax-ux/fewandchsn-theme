@@ -13,6 +13,7 @@ import { XWatcher, XApiSource, DemoXSource } from './xwatch.js';
 import { Learner } from './learn.js';
 import { PaperTrader } from './paper.js';
 import { TrendScanner } from './trends.js';
+import { DeepChecker } from './deepcheck.js';
 
 const ts = () => new Date().toISOString().slice(11, 19);
 const log = {
@@ -82,6 +83,7 @@ log.info(`  Phone alerts (ntfy): ${ntfy.enabled ? `on - in the ntfy app, subscri
 if (telegram.enabled) log.info(`  Telegram: ${cfg.telegramChatId ? 'on' : 'token set - send /chatid to your bot to get your chat id'}`);
 
 engine.start();
-startServer({ engine, store, cfg, log });
+const deepcheck = new DeepChecker({ chain: cfg.demo ? null : chain, store, cfg, engine, log });
+startServer({ engine, store, cfg, deepcheck, log });
 telegram.poll();
 notifier.info(`🤖 Memecoin bot is running${cfg.demo ? ' (DEMO - fake coins)' : ''}. You'll get alerts here.`);

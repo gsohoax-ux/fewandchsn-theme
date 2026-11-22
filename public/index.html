@@ -122,6 +122,13 @@
   .outc { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 8px; margin: 6px 0; }
   .outc div { background: var(--panel2); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; }
   .outc b { display: block; font-size: 18px; } .outc small { color: var(--muted); font-size: 11px; }
+  .dc { display: flex; gap: 8px; padding: 12px 14px; flex-wrap: wrap; }
+  .dc input { flex: 1 1 280px; min-width: 0; background: var(--panel2); border: 1px solid var(--line); color: var(--text); border-radius: 8px; padding: 10px 12px; font: 13px ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .dc button { background: var(--accent); color: #fff; border: 0; border-radius: 8px; padding: 10px 16px; font: inherit; font-weight: 700; cursor: pointer; }
+  .dc button:disabled { opacity: .6; cursor: wait; }
+  .vd { font-size: 22px; font-weight: 800; letter-spacing: .5px; padding: 4px 12px; border-radius: 8px; }
+  .vd-SAFE { background: var(--green); color: #04120a; } .vd-CAUTION { background: var(--yellow); color: #1a1500; } .vd-AVOID { background: var(--red); color: #fff; } .vd-UNVERIFIED { background: #5b6275; color: #fff; }
+  .ck { list-style: none; margin: 0; padding: 0; } .ck li { padding: 4px 0; }
   .disclaimer { color: var(--muted); font-size: 12px; padding: 0 20px 20px; text-align: center; }
   @media (max-width: 700px) {
     .hide-sm { display: none; } td, th { padding: 8px 6px; }
@@ -140,6 +147,8 @@
 <div class="ticker" id="ticker"></div>
 <main>
   <section>
+    <div class="card" style="margin-bottom:16px"><h2><span>🔍 Deep check a coin</span><span class="muted">bundles · wallet links · rug risks</span></h2>
+      <form class="dc" id="dcform"><input id="dcmint" placeholder="Paste a contract address…" autocomplete="off" spellcheck="false"><button id="dcbtn">Check</button></form></div>
     <div class="stats" id="stats"></div>
     <div class="card" style="margin-bottom:16px"><h2><span>Board</span><span class="muted">tap a coin for details</span></h2><div class="board" id="board"></div></div>
     <div class="card" id="papercard" style="margin-bottom:16px"><h2><span>📄 Paper trading</span><span class="muted">fake money · real coins · follows every alert</span></h2><div class="paper" id="paper"></div></div>
@@ -427,6 +436,41 @@ function openCoin(c) {
     <p class="muted" style="margin-top:16px">Scored ${new Date(c.evaluatedAt).toLocaleTimeString()} at ${esc(c.stage)} stage · safety data: ${sf.source === 'chain' ? 'on-chain' : 'timing estimate'}</p>`;
   $('dlg').showModal();
 }
+
+// ---- deep check
+const ICONS = { ok: '✅', warn: '⚠️', bad: '⛔', info: 'ℹ️', unknown: '❔' };
+function renderCheck(r) {
+  const groups = [...new Set(r.checks.map((c) => c.group))];
+  const m = r.market;
+  $('dlg-h').innerHTML = `<span class="vd vd-${r.verdict}">${r.verdict}</span><div><div class="tick">${r.symbol ? '$' + esc(r.symbol) : 'Unknown token'}${r.name ? ' · ' + esc(r.name) : ''}</div><code>${r.mint}</code></div><button class="close" onclick="dlg.close()">×</button>`;
+  $('dlg-b').innerHTML = `
+    <div class="links">${r.links.padre ? `<a target="_blank" href="${r.links.padre}">Padre</a>` : ''}<a target="_blank" href="${r.links.pump}">pump.fun</a><a target="_blank" href="${esc(r.links.dexscreener)}">DexScreener</a><a target="_blank" rel="noopener" href="${r.links.solscan}">Solscan</a><a target="_blank" rel="noopener" href="${r.links.rugcheck}">RugCheck</a><button class="copy" data-copy="${r.mint}">Copy CA</button></div>
+    <p><b>Safety ${r.score}/100</b> · <span class="down">${r.bad} red flag${r.bad === 1 ? '' : 's'}</span> · <span style="color:var(--yellow)">${r.warn} warning${r.warn === 1 ? '' : 's'}</span>${r.unknown ? ` · <span class="muted">${r.unknown} not checked</span>` : ''}
+      ${m ? `<br><span class="muted">${m.onCurve ? 'On the bonding curve' : 'Trading on ' + esc(m.dex)} · MC $${(m.mcUsd / 1000).toFixed(1)}k${m.onCurve ? '' : ` · liquidity $${(m.liqUsd / 1000).toFixed(1)}k`}</span>` : ''}</p>
+    ${r.live ? `<p>🤖 <b>Bot's live read:</b> score ${r.live.score} · ${esc(r.live.verdict)} · momentum ${r.live.momentum} · narrative ${r.live.narrative} · ${esc(r.live.confidence)} confidence${r.live.runner ? ' · 🚀 runner potential' : ''}</p>` : ''}
+    ${groups.map((g) => `<h3>${esc(g)}</h3><ul class="ck">${r.checks.filter((c) => c.group === g).map((c) => `<li>${ICONS[c.level] ?? ''} ${esc(c.text)}</li>`).join('')}</ul>`).join('')}
+    ${r.creator ? `<p class="muted" style="font-size:12px">Creator wallet: <code>${r.creator}</code></p>` : ''}
+    ${r.notes.length ? `<h3>Couldn't check</h3><ul class="ck">${r.notes.map((n) => `<li class="muted">❔ ${esc(n)}</li>`).join('')}</ul>` : ''}
+    ${r.verdict === 'UNVERIFIED' ? '<p style="color:var(--yellow)">UNVERIFIED: the key on-chain checks couldn\'t run, so this coin is NOT confirmed safe. Try again in a minute.</p>' : ''}
+    <p class="muted" style="font-size:11px">Checked in ${(r.tookMs / 1000).toFixed(1)}s. A clean check lowers the risk but can't rule out a rug: devs can still sell. Never trade more than you can lose.</p>`;
+}
+$('dcform').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const mint = $('dcmint').value.trim();
+  if (!mint) return;
+  $('dcbtn').disabled = true; $('dcbtn').textContent = 'Checking…';
+  $('dlg-h').innerHTML = `<div class="tick">Deep checking…</div><button class="close" onclick="dlg.close()">×</button>`;
+  $('dlg-b').innerHTML = '<p class="muted">Reading the launch block, tracing wallet funding, checking holders, liquidity and RugCheck. This takes 10–30 seconds.</p>';
+  if (!$('dlg').open) $('dlg').showModal();
+  try {
+    const r = await fetch('/api/check?mint=' + encodeURIComponent(mint), { cache: 'no-store' });
+    if (r.status === 401) return location.reload();
+    const j = await r.json();
+    if (j.error) $('dlg-b').innerHTML = `<p class="down">${esc(j.error)}</p>`;
+    else renderCheck(j);
+  } catch (err) { $('dlg-b').innerHTML = `<p class="down">Check failed: ${esc(err.message)}</p>`; }
+  finally { $('dcbtn').disabled = false; $('dcbtn').textContent = 'Check'; }
+});
 
 document.addEventListener('click', (e) => {
   const cp = e.target.closest('[data-copy]');
