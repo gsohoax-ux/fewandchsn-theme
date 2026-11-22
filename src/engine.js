@@ -40,7 +40,11 @@ export class Engine {
     this.feed.on('create', (m) => this.onCreate(m));
     this.feed.on('trade', (m) => this.onTrade(m));
     this.feed.on('migrate', (m) => this.onMigrate(m));
-    this.feed.on('status', (s) => { this.feedConnected = s.connected; if (s.problem) this.feedProblem = s.problem; });
+    this.feed.on('status', (s) => {
+      if (this.feedConnected && !s.connected) { this.disconnectedAt = Date.now(); this.funnel?.count('feed:disconnect'); }
+      if (!this.feedConnected && s.connected && this.disconnectedAt) { this.metrics?.time('feedReconnect', Date.now() - this.disconnectedAt, 'Feed reconnect time'); this.disconnectedAt = null; }
+      this.feedConnected = s.connected; if (s.problem) this.feedProblem = s.problem;
+    });
     this.feed.start();
     if (this.xwatch?.enabled) this.xwatch.start();
     this.trends?.start();
@@ -75,7 +79,8 @@ export class Engine {
   }
 
   onCreate(msg) {
-    if (this.coins.has(msg.mint)) return;
+    if (this.coins.has(msg.mint)) { this.funnel?.count('discovery:duplicate'); return; }
+    this.funnel?.count('discovery:new');
     if (this.coins.size >= this.cfg.maxTrackedCoins) this.#evictOne();
     const coin = new Coin(msg);
     this.coins.set(coin.mint, coin);
@@ -169,7 +174,7 @@ export class Engine {
     if (this.events.length > 300) this.events.splice(0, this.events.length - 300);
   }
 
-  #kill(reason) { this.kills.set(reason, (this.kills.get(reason) ?? 0) + 1); }
+  #kill(reason) { this.kills.set(reason, (this.kills.get(reason) ?? 0) + 1); this.funnel?.count(`engine:reject:${reason.replace(/\d+/g, 'N')}`); }
 
   /** Terminal-style board: New Pairs, the middle of the curve, and the Final Stretch. */
   board(now = Date.now()) {
@@ -409,13 +414,21 @@ export class Engine {
 
   #enqueue(coin, stage) {
     coin.evaluating = true;
-    this.queue.push([coin, stage]);
+    // priority: time-critical stages first (Final Stretch, X/trend narratives, manual), then fresh coins, then rechecks
+    const prio = { final: 0, x: 0, trend: 0, manual: 0, fresh: 1, mid: 2, recheck: 3 }[stage] ?? 2;
+    const item = [coin, stage, Date.now(), prio];
+    const i = this.queue.findIndex((q) => q[3] > prio);
+    if (i < 0) this.queue.push(item); else this.queue.splice(i, 0, item);
+    this.metrics?.gauge('evalQueue', this.queue.length);
+    this.funnel?.count(`engine:queued:${stage}`);
     this.#pump();
   }
 
   #pump() {
     while (this.running < MAX_PARALLEL_EVALS && this.queue.length) {
-      const [coin, stage] = this.queue.shift();
+      const [coin, stage, queuedAt] = this.queue.shift();
+      this.metrics?.time('evalQueueWait', Date.now() - queuedAt, 'Evaluation queue wait');
+      this.metrics?.gauge('evalQueue', this.queue.length);
       this.running++;
       this.evaluate(coin, stage)
         .catch((e) => this.log.warn(`eval ${coin.symbol}: ${e.message}`))
@@ -515,6 +528,10 @@ export class Engine {
     if (!coin.counted) {
       coin.counted = true;
       this.pipeline.scored++;
+      this.funnel?.count('engine:scored');
+      this.funnel?.count(`engine:verdict:${safety.verdict}`);
+      this.funnel?.count(`engine:safetySource:${safety.source ?? (chainData.source === 'chain' ? 'chain' : 'timing')}`);
+      if (chainData.errors?.length) this.funnel?.count('engine:chainErrors');
       if (safety.verdict !== 'AVOID') {
         this.scoreLog.push([now, score]);
         if (this.scoreLog.length > 20_000) this.scoreLog.splice(0, 5_000);
@@ -575,6 +592,7 @@ export class Engine {
     coin.peakMcSinceAlert = Math.max(coin.peakMcSinceAlert, coin.mcSol);
     this.store.addAlert(coin, stage, coin.result);
     this.counters.alerts++;
+    this.funnel?.count(`engine:alert:${stage}`);
     this.log.info(`ALERT ${light} $${coin.symbol} ${score}/100 [${stage}] conf ${coin.result.confidence.label} ${coin.mint}`);
     this.logEvent('ALERT', coin, `score ${score} · ${stage === 'x' ? 'X narrative' : stage} · ${coin.result.confidence.label} confidence`, 'good');
     if (!this.paper?.positions.has(coin.mint)) {

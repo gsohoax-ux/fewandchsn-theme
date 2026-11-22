@@ -4,6 +4,7 @@
 import { createServer } from 'node:http';
 import { readFileSync, existsSync } from 'node:fs';
 import { analytics } from './analytics.js';
+import { diagnose } from './diagnostics.js';
 import { TIMEFRAMES } from './candles.js';
 import { createHmac, timingSafeEqual } from 'node:crypto';
 
@@ -52,7 +53,7 @@ const APP_FILE_RE = /^\/app\/([a-z0-9-]+\.js)$/;
 class HttpError extends Error { constructor(status, msg) { super(msg); this.status = status; } }
 const bad = (msg) => new HttpError(400, msg);
 
-export function startServer({ engine, store, cfg, deepcheck = null, manual = null, strategy = null, candles = null, health = null, paper = null, trends = null, copy = null, market = null, metrics = null, log = console }) {
+export function startServer({ engine, store, cfg, deepcheck = null, manual = null, strategy = null, candles = null, health = null, paper = null, trends = null, copy = null, market = null, metrics = null, funnel = null, learner = null, log = console }) {
   const token = cfg.dashboardPassword
     ? createHmac('sha256', cfg.dashboardPassword).update('memecoin-bot-session-v1').digest('hex') : '';
   const same = (a, b) => { const x = Buffer.from(a), y = Buffer.from(b); return x.length === y.length && timingSafeEqual(x, y); };
@@ -131,6 +132,8 @@ export function startServer({ engine, store, cfg, deepcheck = null, manual = nul
         detail: `${total - report.unknown} of ${total} checks ran${report.notes.length ? `; ${report.notes.length} could not run` : ''}${report.verdict === 'UNVERIFIED' ? '; key on-chain checks missing' : ''}` };
       return report;
     },
+    'GET /api/diagnostics': (url) => diagnose({ cfg, engine, store, paper, manual, strategy, copy, health, metrics, market, funnel, learner,
+      hours: Math.max(1, Math.min(720, Number(url.searchParams.get('hours')) || 24)) }),
     'GET /api/latency': () => {
       const s = engine.status();
       const m = metrics?.view() ?? { timings: {}, rates: {}, gauges: {} };

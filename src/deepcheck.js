@@ -369,7 +369,12 @@ export class DeepChecker {
     let live = null;
     const coin = this.engine?.coins.get(mint);
     if (coin) {
-      const r = await step('live score', () => this.engine.evaluate(coin, 'manual'));
+      // Reuse the bot's own evaluation when it is fresh; otherwise re-score with the on-chain data it already has
+      // ('recheck' reuses chain data). Never run alongside an evaluation in progress, and never re-download
+      // everything from Helius: that doubled Helius load during deep checks and caused rate-limit failures.
+      const fresh = coin.result && Date.now() - coin.result.at < 120_000;
+      const r = fresh || coin.evaluating ? coin.result
+        : await step('live score', async () => { coin.evaluating = true; try { return await this.engine.evaluate(coin, coin.chainData ? 'recheck' : 'manual'); } finally { coin.evaluating = false; } });
       if (r) live = { score: r.score, verdict: r.safety.verdict, momentum: r.momentum.score, narrative: r.narrative.score, confidence: r.confidence.label, runner: r.runner?.is ?? false };
     }
 

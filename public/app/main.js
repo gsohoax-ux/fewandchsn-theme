@@ -13,7 +13,7 @@ const MODULES = { dashboard, strategy, trade, copy, setuh, auto };
 const NAV = [
   { id: 'dashboard', title: 'Dashboard', short: 'Dashboard', icon: ICONS.dashboard, pages: [
     ['overview', 'Overview', 'dashboard', 'overview'], ['trends', 'Trends', 'dashboard', 'trends'],
-    ['learning', 'Learning Center', 'dashboard', 'learning'], ['system', 'System & latency', 'dashboard', 'system']] },
+    ['learning', 'Learning Center', 'dashboard', 'learning'], ['system', 'System & latency', 'dashboard', 'system'], ['diagnostics', 'Diagnostics (audit)', 'dashboard', 'diagnostics']] },
   { id: 'strategy', title: 'Setuh Strategy', short: 'Strategy', icon: ICONS.strategy, pages: [
     ['newpairs', 'New Pairs', 'strategy', 'newpairs'], ['final', 'Final Stretch A / B / C', 'strategy', 'final'],
     ['migrated', 'Migrated', 'strategy', 'migrated'], ['rules', 'Rules & thresholds', 'strategy', 'settings']] },

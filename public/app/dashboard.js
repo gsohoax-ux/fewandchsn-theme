@@ -1,7 +1,7 @@
 // Section 1: Dashboard — market overview, trends, learning center, system health.
 import { $, esc, fmt, api, poller, spark, kpi, card, scoreCls, store, cls } from './core.js';
 
-export const SUBS = [['overview', 'Overview'], ['trends', 'Trends'], ['learning', 'Learning Center'], ['system', 'System Health']];
+export const SUBS = [['overview', 'Overview'], ['trends', 'Trends'], ['learning', 'Learning Center'], ['system', 'System Health'], ['diagnostics', 'Diagnostics']];
 let root, sub = 'overview';
 let analyticsData = null, learningData = null, healthData = null;
 
@@ -24,15 +24,16 @@ export function show(s) {
   learningPoll[sub === 'learning' ? 'start' : 'stop']();
   healthPoll[sub === 'system' ? 'start' : 'stop']();
   latencyPoll[sub === 'system' ? 'start' : 'stop']();
+  diagPoll[sub === 'diagnostics' ? 'start' : 'stop']();
   render();
 }
-export function hide() { analyticsPoll.stop(); learningPoll.stop(); healthPoll.stop(); latencyPoll.stop(); }
+export function hide() { analyticsPoll.stop(); learningPoll.stop(); healthPoll.stop(); latencyPoll.stop(); diagPoll.stop(); }
 
 function render() {
   const s = store.state;
   if (!s) { root.innerHTML = '<div class="empty">Connecting to the bot…</div>'; return; }
   const keepScroll = [...root.querySelectorAll('[data-keep]')].map((el) => [el.dataset.keep, el.scrollTop]);
-  root.innerHTML = sub === 'overview' ? overview(s) : sub === 'trends' ? trends(s) : sub === 'learning' ? learning(s) : system(s);
+  root.innerHTML = sub === 'overview' ? overview(s) : sub === 'trends' ? trends(s) : sub === 'learning' ? learning(s) : sub === 'diagnostics' ? diagnosticsView() : system(s);
   for (const [k, top] of keepScroll) { const el = root.querySelector(`[data-keep="${k}"]`); if (el) el.scrollTop = top; }
 }
 
@@ -347,4 +348,58 @@ function latencyPanel() {
       ${row('Price refresh (DexScreener)', 'priceRefresh', 'Only when the live stream can\'t vouch for a price')}
     </tbody></table></div>
     <p class="tiny muted" style="margin-bottom:0">Healthy ≤ 2 s since the last feed message · delayed ≤ 10 s · stale beyond that. New Setuh entries are blocked while the feed is stale or disconnected, and whenever a price is older than the trader's max data age. A paper trader can't have zero latency: every simulated fill uses the newest price the bot had at that moment.</p>`, new Date().toLocaleTimeString());
+}
+
+// ------------------------------------------------------------------ diagnostics (live audit)
+let diagData = null, diagHours = 24;
+const diagPoll = poller(async () => { diagData = await api(`/api/diagnostics?hours=${diagHours}`); if (!root.hidden && sub === 'diagnostics') render(); }, 15_000);
+document.addEventListener('click', (e) => {
+  const h = e.target.closest('[data-diaghours]');
+  if (!h) return;
+  diagHours = Number(h.dataset.diaghours); diagData = null; render(); diagPoll.now();
+});
+const SEV = { critical: 'solid-down', high: 'down', medium: 'warn', low: 'info', info: '' };
+const STAT = (s) => (/^working/.test(s) ? 'ok' : /partially/.test(s) ? 'warn' : /not working/.test(s) ? 'bad' : '');
+const msx = (t) => (t?.n ? `${t.p50 >= 1000 ? (t.p50 / 1000).toFixed(1) + ' s' : Math.round(t.p50) + ' ms'} / ${t.p95 >= 1000 ? (t.p95 / 1000).toFixed(1) + ' s' : Math.round(t.p95) + ' ms'}` : '—');
+function diagnosticsView() {
+  const D = diagData;
+  const head = `<div class="section-title"><h2>Diagnostics — live audit</h2><p>Built only from what this bot measured on this server. Counts persist across restarts.</p></div>
+    <div class="seg" style="margin-bottom:var(--gap)">${[1, 6, 24, 168].map((h) => `<button data-diaghours="${h}" class="${h === diagHours ? 'on' : ''}">${h < 24 ? h + ' h' : h / 24 + ' d'}</button>`).join('')}</div>`;
+  if (!D) return head + '<div class="empty">Building the report…</div>';
+  const rejRow = (r) => `<tr><td class="wrap small">${esc(r.reason)}${r.status ? ` <span class="tag">${esc(r.status)}</span>` : ''}</td><td class="small muted">${esc(r.where)}</td><td class="small">${esc(r.kind)}</td><td class="r num">${r.n}</td></tr>`;
+  const allRej = [...D.rejections.engine, ...D.rejections.automatic, ...D.rejections.setuh, ...D.rejections.copy].sort((a, b) => b.n - a.n);
+  return head + `
+    ${D.demo ? '<div class="notice warn small" style="margin-bottom:var(--gap)">Demo mode: simulated coins. These numbers describe the simulator, not the real market.</div>' : ''}
+    ${D.coverageHours < diagHours ? `<div class="notice info small" style="margin-bottom:var(--gap)">Counts cover ${D.coverageHours} h so far (recording started ${D.coverageFrom ? new Date(D.coverageFrom).toLocaleString() : 'just now'}).</div>` : ''}
+    ${card('Findings', D.findings.length ? `<table class="t"><tbody>${D.findings.map((f) => `<tr><td style="width:90px"><span class="tag ${SEV[f.severity]}">${f.severity.toUpperCase()}</span></td>
+      <td class="wrap"><b>${esc(f.title)}</b><div class="small muted">${esc(f.evidence)}</div><div class="small" style="margin-top:3px">${esc(f.fix)}${f.risk ? ` <span class="warn">Risk: ${esc(f.risk)}</span>` : ''}</div></td>
+      <td class="small muted" style="width:70px">Group ${f.group}</td></tr>`).join('')}</tbody></table>` : '<div class="empty">No problems detected.</div>', 'group 1 = bug · 2 = speed · 3 = strategy/config', { tight: true })}
+    <div class="grid g2" style="margin-top:var(--gap)">
+      ${card('System health', `<table class="t"><tbody>${D.components.map((c) => `<tr><td style="width:36%"><span class="dot ${STAT(c.status)}"></span> <b>${esc(c.name)}</b><div class="tiny muted">${esc(c.status)}</div></td><td class="small wrap">${esc(c.evidence)}</td></tr>`).join('')}</tbody></table>`, '', { tight: true })}
+      <div class="grid" style="align-content:start">
+        ${card('Discovery', `<div class="kv">
+          <div><small>New coins</small><b>${D.discovery.newCoins}</b></div><div><small>Per hour</small><b>${D.discovery.perHour ?? '—'}</b></div><div><small>Per minute now</small><b>${D.discovery.perMinuteNow}</b></div>
+          <div><small>Duplicates ignored</small><b>${D.discovery.duplicates}</b></div><div><small>Scored</small><b>${D.discovery.scored} <span class="tiny muted">${D.discovery.scoredPct ?? '—'}%</span></b></div>
+          <div><small>Died before scoring</small><b>${D.discovery.neverScored}</b></div><div><small>Disconnects</small><b>${D.discovery.disconnects}</b></div>
+          <div><small>Queue now</small><b>${D.discovery.queueNow}</b></div><div><small>Queue wait p50 / p95</small><b>${msx(D.discovery.queueWait)}</b></div>
+          <div><small>Evaluation p50 / p95</small><b>${msx(D.discovery.evalTime)}</b></div><div><small>Discovery latency</small><b>${msx(D.discovery.discoveryLatency)}</b></div></div>`)}
+        ${card('Where rejections come from', Object.keys(D.rejectionsByKind).length ? `<table class="t"><tbody>${Object.entries(D.rejectionsByKind).sort((a, b) => b[1] - a[1]).map(([k, n]) => `<tr><td>${esc(k)}</td><td class="r num">${n}</td></tr>`).join('')}</tbody></table>` : '<div class="empty">No rejections recorded yet.</div>', 'mandatory safety vs adjustable', { tight: true })}
+      </div>
+    </div>
+    <div style="margin-top:var(--gap)">${card('Every rejection reason', allRej.length ? `<div class="scroll-x" style="max-height:420px"><table class="t"><thead><tr><th>Reason</th><th>Where</th><th>Kind</th><th class="r">Count</th></tr></thead><tbody>${allRej.map(rejRow).join('')}</tbody></table></div>` : '<div class="empty">None yet.</div>', `${allRej.reduce((a, r) => a + r.n, 0)} total`, { tight: true })}</div>
+    <div class="grid g2" style="margin-top:var(--gap)">
+      ${card('Setuh setups', `<div class="scroll-x"><table class="t"><thead><tr><th>Setup</th><th class="r">Episodes</th><th class="r">Entered</th><th class="r">Rejected</th><th class="r">Missed</th><th class="r">Invalidated</th><th class="r">No data</th><th class="r">Skipped</th><th class="r">Trades</th><th class="r">Win</th></tr></thead><tbody>
+        ${D.strategy.rows.map((r) => `<tr><td>${esc(r.name)}${r.enabled ? '' : ' <span class="tag">OFF</span>'}</td><td class="r num">${r.closedEpisodes}</td><td class="r num">${r.entered}</td><td class="r num">${r.rejected}</td><td class="r num">${r.missed}</td><td class="r num">${r.invalidated}</td><td class="r num">${r.insufficient}</td><td class="r num">${r.skipped}</td><td class="r num">${r.trades}</td><td class="r num">${r.winRate != null ? r.winRate + '%' : '—'}</td></tr>`).join('')}
+        </tbody></table></div><div class="small muted" style="padding:8px 14px">Full safety checks on candidates: ${D.strategy.deepVerdicts.map(([k, n]) => `${esc(k)} ${n}`).join(' · ') || 'none yet'}</div>`, '', { tight: true })}
+      ${card('Paper trading activity', `<div class="scroll-x"><table class="t"><thead><tr><th>Book</th><th class="r">Opened</th><th class="r">Closed</th><th class="r">Open now</th><th class="r">Avg size</th><th class="r">Win rate</th><th class="r">Net (closed)</th><th class="r">Unrealized</th><th class="r">Avg hold</th><th class="r">Gap between entries</th></tr></thead><tbody>
+        ${D.paper.map((b) => `<tr><td class="b">${esc(b.book)}</td><td class="r num">${b.opened}</td><td class="r num">${b.closed}</td><td class="r num">${b.open}</td><td class="r num">${fmt.usd(b.avgSizeUsd, 2)}</td><td class="r num">${b.winRate != null ? b.winRate + '%' : '—'}</td><td class="r num ${cls(b.netUsd)}">${b.trades ? fmt.signed(b.netUsd) : '—'}</td><td class="r num ${cls(b.unrealizedUsd)}">${b.open ? fmt.signed(b.unrealizedUsd) : '—'}</td><td class="r num">${b.avgHoldSec != null ? fmt.age(b.avgHoldSec) : '—'}</td><td class="r num">${b.avgGapMin != null ? b.avgGapMin + ' min' : '—'}</td></tr>`).join('')}
+        </tbody></table></div>`, 'each book separately', { tight: true })}
+    </div>
+    <div class="grid g2" style="margin-top:var(--gap)">
+      ${card('Latency (p50 / p95)', `<table class="t"><tbody>${Object.entries(D.latency).map(([k, t]) => `<tr><td>${esc(t.label ?? k)}</td><td class="r num">${msx(t)}</td><td class="r num muted">${t.n}</td></tr>`).join('') || '<tr><td class="muted">No samples yet.</td></tr>'}</tbody></table>`, '', { tight: true })}
+      ${card('Storage & learning', `<div class="kv"><div><small>Database</small><b style="font-size:12px">${esc(D.persistence.path ?? '—')}</b></div><div><small>Persistent</small><b class="${D.persistence.persistent ? 'up' : 'down'}">${D.persistence.persistent ? 'yes' : 'NO'}</b></div>
+        <div><small>Starts recorded</small><b>${D.persistence.boots}</b></div><div><small>Since</small><b style="font-size:12px">${D.persistence.firstBoot ? new Date(D.persistence.firstBoot).toLocaleString() : '—'}</b></div>
+        <div><small>Learning observations</small><b>${D.learning?.samples?.done ?? '—'} / 300</b></div><div><small>Model</small><b style="font-size:12px">${D.learning?.validated ? 'in use' : 'not in use'}</b></div></div>
+        <div class="small muted" style="margin-top:8px">${Object.entries(D.persistence.tables).map(([k, n]) => `${esc(k)} ${n}`).join(' · ')}</div>`)}
+    </div>`;
 }

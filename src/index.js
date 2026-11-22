@@ -20,6 +20,7 @@ import { CandleService } from './candles.js';
 import { StrategyEngine } from './strategy/engine.js';
 import { CopyEngine } from './copy/engine.js';
 import { MarketData } from './market.js';
+import { Funnel, reasonKey } from './funnel.js';
 import { Metrics, watchEventLoop } from './metrics.js';
 import { DEMO_TRADERS } from './feed.js';
 
@@ -39,6 +40,11 @@ const chain = cfg.demo ? new DemoChain() : new HeliusChain({
 const xSource = cfg.demo ? new DemoXSource() : cfg.xBearerToken ? new XApiSource({ token: cfg.xBearerToken }) : null;
 const feed = cfg.demo ? new DemoFeed(chain, log, xSource) : new PumpPortalFeed(cfg.pumpportalUrl, log);
 const store = new Store(cfg.demo ? ':memory:' : cfg.dbPath);
+// Audit trail of starts: if the database never remembers an earlier start, it is not on persistent storage
+const boots = store.getKv('boots') ?? [];
+boots.push(Date.now());
+store.setKv('boots', boots.slice(-100));
+const funnel = new Funnel({ store });
 const telegram = new Telegram({ token: cfg.telegramToken, chatId: cfg.telegramChatId, log });
 const ai = new AiNarrator({ apiKey: cfg.anthropicKey, model: cfg.aiModel, maxPerHour: cfg.aiMaxCallsPerHour });
 const ntfy = new Ntfy({ server: cfg.ntfyServer, topic: resolveNtfyTopic(cfg, log), token: cfg.ntfyToken, log });
@@ -48,7 +54,11 @@ const xwatch = new XWatcher({ source: xSource, ai, cfg, notifier, log });
 const learner = new Learner({ store, cfg, log });
 const paper = new PaperTrader({ cfg, store, log, getSolUsd: () => engine.solUsd, getRegime: () => engine.regime(),
   moonbagWorthy: (mint) => engine.moonbagWorthy(mint),
-  onEvent: (agent, coin, text, level) => engine.logEvent(agent, coin, text, level),
+  onEvent: (agent, coin, text, level) => {
+    if (text.startsWith('skipped: ')) funnel.count(`auto:skip:${reasonKey(text.slice(9))}`);
+    else if (text.startsWith('paper-bought')) funnel.count('auto:entry');
+    engine.logEvent(agent, coin, text, level);
+  },
   onNotify: (text) => notifier.info(text) });
 const trends = cfg.trends ? new TrendScanner({ cfg, store, ai, notifier, log, demo: cfg.demo, extraItems: () => engine.trendItems() }) : null;
 const engine = new Engine({ cfg, feed, chain, store, notifier, ai, xwatch, learner, paper, trends, log });
@@ -98,6 +108,7 @@ if (telegram.enabled) log.info(`  Telegram: ${cfg.telegramChatId ? 'on' : 'token
 const metrics = new Metrics();
 watchEventLoop(metrics);
 engine.metrics = metrics;
+engine.funnel = funnel;
 const market = new MarketData({ engine, feed, metrics, chain: cfg.demo ? null : chain, log });
 engine.start();
 // background-loop heartbeat for System Health (the engine schedules its own loop)
@@ -111,7 +122,7 @@ manual.start(health);
 const candles = new CandleService({ engine, market, log });
 // Strategy section (System B): Setuh setups with their own paper book and budget
 // Autonomous Setuh Scalping Paper Trader (System B): own balance, positions, journal; checks coins with Coin Check
-const strategy = cfg.strategyEnabled ? new StrategyEngine({ cfg, engine, store, feed, candles, market, deepcheck, metrics, log }) : null;
+const strategy = cfg.strategyEnabled ? new StrategyEngine({ cfg, engine, store, feed, candles, market, deepcheck, metrics, funnel, log }) : null;
 strategy?.start(health);
 // Copy trading (System D): mirror followed wallets' buys, adds, partial sells and exits in its own paper book
 const copy = new CopyEngine({ cfg, store, engine, feed, market, chain: cfg.demo ? null : chain, log });
@@ -121,6 +132,6 @@ if (cfg.demo && !copy.traders.size) {
   }
 }
 copy.start(health);
-startServer({ engine, store, cfg, deepcheck, manual, strategy, candles, health, paper, trends, copy, market, metrics, log });
+startServer({ engine, store, cfg, deepcheck, manual, strategy, candles, health, paper, trends, copy, market, metrics, funnel, learner, log });
 telegram.poll();
 notifier.info(`🤖 Memecoin bot is running${cfg.demo ? ' (DEMO - fake coins)' : ''}. You'll get alerts here.`);

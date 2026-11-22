@@ -15,6 +15,7 @@ import { candlesFromTrades } from '../candles.js';
 import { dayKey } from '../paper.js';
 import { dexSnapshots } from '../dexscreener.js';
 import { liquidityRead, priceImpact, curveVSolFromMc } from '../liquidity.js';
+import { reasonKey } from '../funnel.js';
 
 const CURVE_SETUPS = ['newPairs', 'finalA', 'finalB', 'finalC'];
 const RETRY_MS = 2 * 60_000;      // a rejected / invalidated coin+setup is not re-reported for 2 minutes
@@ -38,8 +39,8 @@ const RANGES = {
 export const STRATEGY_DEFAULTS = SETUH_DEFAULTS; // older name
 
 export class StrategyEngine {
-  constructor({ cfg, engine, store, feed = null, candles = null, market = null, deepcheck = null, metrics = null, fetchFn = fetch, log = console, now = () => Date.now() }) {
-    Object.assign(this, { cfg, engine, store, feed, candles, market, deepcheck, metrics, fetchFn, log, now });
+  constructor({ cfg, engine, store, feed = null, candles = null, market = null, deepcheck = null, metrics = null, funnel = null, fetchFn = fetch, log = console, now = () => Date.now() }) {
+    Object.assign(this, { cfg, engine, store, feed, candles, market, deepcheck, metrics, funnel, fetchFn, log, now });
     this.book = new PaperBook({ store, cfg, book: 'strategy', getSolUsd: () => engine?.solUsd ?? 0, log, now, onEvent: (e) => this.#onFill(e) });
     this.sync = market ? market.bindBook(this.book, 'setuh') : null;
     this.active = new Map();     // `${setup}:${mint}` -> current signal episode
@@ -273,7 +274,8 @@ export class StrategyEngine {
   #queueDeep(mint, priority = false) {
     if (!this.deepcheck) return;
     const d = this.deep.get(mint);
-    if (d && (d.running || this.now() - d.at < DEEP_TTL_MS)) return;
+    // a failed check is retried after a minute (not left to stall for the full cache time)
+    if (d && (d.running || this.now() - d.at < (d.error ? 60_000 : DEEP_TTL_MS))) return;
     if (this.deepQueue.includes(mint)) return;
     priority ? this.deepQueue.unshift(mint) : this.deepQueue.push(mint);
     this.#pumpDeep();
@@ -285,7 +287,7 @@ export class StrategyEngine {
       this.deep.set(mint, { ...(this.deep.get(mint) ?? {}), running: true, at: this.now() });
       const t0 = performance.now();
       this.deepcheck.check(mint)
-        .then((report) => { this.deep.set(mint, { at: this.now(), running: false, report }); this.metrics?.time('deepCheck', performance.now() - t0, 'Full safety check (Coin Check)'); })
+        .then((report) => { this.deep.set(mint, { at: this.now(), running: false, report }); this.funnel?.count(`setuh:deep:${report.verdict}`); this.metrics?.time('deepCheck', performance.now() - t0, 'Full safety check (Coin Check)'); })
         .catch((e) => this.deep.set(mint, { at: this.now(), running: false, error: e.message }))
         .finally(() => { this.deepRunning--; this.#pumpDeep(); });
     }
@@ -302,7 +304,7 @@ export class StrategyEngine {
       candles: candlesFromTrades(coin.trades, setupCfg.candleSec ?? 30, solUsd, { now: this.now(), supply: 1, maxCandles: 400 }),
       trades: coin.trades, safety: r?.safety ?? null, narrative: r?.narrative?.score ?? null, insiders,
       bundleHeldPct: r?.safety?.launchBundle?.heldPct ?? null,
-      devSold: coin.devSold, devSoldPct: coin.devSoldPct, migrated: coin.migrated, dev: this.devReputation(coin.creator),
+      devSold: coin.devSold, devSoldPct: coin.devSoldPct, migrated: coin.migrated, dev: this.devReputation(coin.creator), chainVerified: coin.chainData?.source === 'chain',
       symbol: coin.symbol, name: coin.name, mint: coin.mint, creator: coin.creator, vSol: coin.vSol, live: r ?? null,
     };
   }
@@ -368,6 +370,8 @@ export class StrategyEngine {
     if (stage === 'rejected') { sig.status = 'rejected'; sig.reason = ev.rejectReason; this.#activity('rejected', sig, `Rejected: ${ev.rejectReason}`); this.#close(key, sig, true); return; }
     if (stage === 'idle') { sig.status = 'invalidated'; sig.reason = `Setup invalidated before entry: ${ev.unconfirmed.slice(0, 2).join('; ') || 'pattern broke down'}`; this.#activity('invalidated', sig, sig.reason); this.#close(key, sig, true); return; }
     if (stage !== 'signal') {
+      // the signal lapsed (if it had fired): the next one starts a fresh signal price and time
+      if (sig.validAt) { delete sig.validAt; delete sig.signalPriceUsd; delete sig.signalMcUsd; }
       sig.status = stage;
       if (prevStatus !== stage) this.#activity(stage, sig, `${label(stage)}${stage === 'waiting_confirmation' ? `: setup confirmed, waiting for ${ev.unconfirmed.slice(0, 2).join(' / ')}` : stage === 'insufficient_data' ? `: ${ev.conditions.filter((c) => c.ok === null).map((c) => c.label).slice(0, 2).join(' / ')}` : ''}`);
       if (!sig.saved || now - sig.saved > 60_000 || prevStatus !== stage) { sig.saved = now; this.store.saveSignal(sig); }
@@ -376,10 +380,15 @@ export class StrategyEngine {
     if (this.armed.get(key) === false) return;
     if (this.pending.has(sig.id)) return;
     // every rule met: gates, confidence, then entry (or approval)
-    sig.validAt ??= now;
+    sig.validAt ??= now; // reset whenever the signal lapses (see above), so drift is measured from THIS signal
     sig.signalPriceUsd ??= ctx.mcUsd / ctx.supply;
     sig.signalMcUsd ??= ctx.mcUsd;
     const g = this.#gates(ctx, ev, market);
+    const dErr = this.deep.get(ctx.mint);
+    if (!g.report && dErr?.error && !dErr.running && this.settings.requireDeepCheck && this.deepcheck) {
+      sig.status = 'insufficient_data'; sig.reason = `Full safety check failed: ${dErr.error} (retrying in about a minute)`;
+      this.#activity('insufficient_data', sig, sig.reason); this.#close(key, sig, true); return;
+    }
     sig.safety = { report: g.report ? { verdict: g.report.verdict, score: g.report.score, bad: g.report.bad, warn: g.report.warn, unknown: g.report.unknown, at: g.report.at } : null, gates: g.gates };
     sig.confidence = g.confidence;
     if (g.gates.pending) {
@@ -511,6 +520,8 @@ export class StrategyEngine {
 
   #close(key, sig, retryLater) {
     this.store.saveSignal(sig);
+    this.funnel?.count(`setuh:${sig.setup}:${sig.status}`);
+    if (sig.reason) this.funnel?.count(`setuhReason:${sig.status}:${reasonKey(sig.reason)}`);
     this.active.delete(key);
     if (retryLater) this.retryAt.set(key, this.now() + RETRY_MS);
     if (this.retryAt.size > 5000) for (const [k, t] of this.retryAt) if (t < this.now()) this.retryAt.delete(k);

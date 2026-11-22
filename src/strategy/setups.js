@@ -172,9 +172,12 @@ export function evalFinalA(ctx, cfg) {
   const peak = pk >= 0 ? cs[pk].h : null;
   conds.push(cond('run', `Ran to ${fmtK(cfg.minPeakMcUsd)}+`, peak == null ? null : peak >= cfg.minPeakMcUsd, `high ${fmtK(peak)}`));
   const sold = ctx.insiders && ctx.insiders.heldAtEvalPct > 1 ? (1 - ctx.insiders.heldNowPct / ctx.insiders.heldAtEvalPct) * 100 : null;
-  const insiderOk = sold != null ? sold >= cfg.insiderSoldPct : ctx.devSold ? true : null;
+  // With verified on-chain data and no bundle / linked wallets at all, this setup doesn't apply (false), rather than
+  // "unknown" (null): there is nobody whose selling it waits for.
+  const insiderOk = sold != null ? sold >= cfg.insiderSoldPct : ctx.devSold ? true : ctx.chainVerified && ctx.insiders == null ? false : null;
   conds.push(cond('insiders', `Bundle / tracked wallets sold ${cfg.insiderSoldPct}%+ of their bag`, cfg.requireInsiderSelling ? insiderOk : true,
-    sold != null ? `launch-block and linked wallets sold ${pct(Math.max(0, sold))}` : ctx.devSold ? `dev sold ${pct(ctx.devSoldPct ?? 0)}` : 'no bundle wallets identified yet'));
+    sold != null ? `launch-block and linked wallets sold ${pct(Math.max(0, sold))}` : ctx.devSold ? `dev sold ${pct(ctx.devSoldPct ?? 0)}`
+      : ctx.chainVerified ? 'no bundle or linked wallets found on-chain: this setup does not apply' : 'no bundle wallets identified yet (on-chain data not available)'));
   const pb = peak ? (1 - ctx.mcUsd / peak) * 100 : null;
   conds.push(cond('pullback', `Retraced ${cfg.pullbackMinPct}–${cfg.pullbackMaxPct}% from the high`, pb == null ? null : pb >= cfg.pullbackMinPct && pb <= cfg.pullbackMaxPct,
     pb == null ? 'no data' : `${pct(pb)} below ${fmtK(peak)}, now ${fmtK(ctx.mcUsd)}`));
