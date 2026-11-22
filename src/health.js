@@ -116,7 +116,7 @@ export function dbHealth(store) {
     const t0 = Date.now();
     store.db.prepare('SELECT 1').get();
     store.setKv('healthcheck', Date.now());
-    for (const t of ['launches', 'alerts', 'samples', 'paper_trades', 'sim_positions', 'sim_fills', 'strategy_signals', 'audit_log']) {
+    for (const t of ['launches', 'alerts', 'samples', 'paper_trades', 'sim_positions', 'sim_fills', 'strategy_signals', 'copy_traders', 'copy_events', 'audit_log']) {
       try { out.tables[t] = store.db.prepare(`SELECT COUNT(*) n FROM ${t}`).get().n; } catch { /* table not present */ }
     }
     const pc = store.db.prepare('PRAGMA page_count').get()?.page_count ?? 0;

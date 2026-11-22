@@ -180,9 +180,9 @@ multiple as a likely outcome.
 Needs the Helius key for the on-chain parts. Results are cached for 2 minutes. A clean check lowers the risk
 but can't rule out a rug, since devs can still sell.
 
-### 🗂 The app: three sections
+### 🗂 The app: four sections
 
-The dashboard is organized like a trading terminal: a sidebar on computers and a bottom bar on phones. Paste any
+The dashboard is organized like a trading terminal with four sections: a sidebar on computers and a bottom bar on phones. Paste any
 address or link into the search bar at the top to jump straight to Coin Check.
 
 | Section | What's in it |
@@ -190,6 +190,7 @@ address or link into the search bar at the top to jump straight to Coin Check.
 | **Dashboard** | **Overview**: headline numbers, live discovery board (New Pairs / In between / Final Stretch), runner detection, 5-minute movers, live ranking, automatic paper trading, alerts, Why they died. **Trends**: confirmed narratives with sources, velocity, AI thesis and coin ideas, viral X posts, Pump.fun themes. **Learning Center**: past outcomes by stage, score, narrative and safety, learned signals, market condition, strategy observations. **System Health**: every service and outside API, background jobs, database, Desk, Logger and audit log. |
 | **Strategy** | The Setuh scalping setups with their own paper trading (see below). |
 | **Coin Check & Paper Trade** | Research one coin, watch its live chart, and manage your own simulated positions. |
+| **Copy Trading** | Follow wallets and mirror all their buys, adds, partial sells and exits with simulated money. |
 
 ### 📐 Strategy (Setuh setups, separate paper trading)
 
@@ -214,6 +215,42 @@ win rate, average win and loss, profit factor, max drawdown, average hold, fees 
 condition. Every rule can be changed per setup in **Rules & settings** without affecting the others, and each setup
 can be switched off. Migrated-coin candles come from GeckoTerminal's free API, so that setup scans a few coins a
 minute.
+
+### 👥 Copy Trading (full trade mirroring, simulated money)
+
+Follow any Solana wallet and the bot mirrors **everything it does** in its own paper book: first buys, adds, partial
+sells (several in a row), full exits and re-entries.
+
+- **Fixed amount per buy:** you choose e.g. $25. Trader buys $500 → copy buys $25. Trader adds $200 → copy adds $25.
+- **Proportional sells:** trader sells 25% of their tokens → copy sells 25%. Then 50% of the rest → 50% of the rest.
+  Everything → the copy closes. The % comes from the wallet's **actual token balance before and after** each
+  transaction, not from guessing.
+- **Only real trades are copied.** Token transfers, wallet funding, liquidity deposits/withdrawals, failed transactions
+  and unrelated token movements are recognized and skipped (shown as IGNORED with the reason).
+- **How trades are found:** Pump.fun / PumpSwap trades arrive instantly from PumpPortal's per-wallet subscription.
+  With a Helius key, every followed wallet is also scanned for new transactions (any DEX: Pump.fun, PumpSwap,
+  Raydium, Jupiter, Meteora, Orca, Moonshot, and trading bots that route through them), and **every trade is
+  confirmed on-chain** before it is copied. Each wallet + transaction + token is executed once, even if it is seen
+  twice or arrives late. Without Helius, it runs in feed-only mode (Pump.fun / PumpSwap only, not confirmed on-chain), and the
+  screen says so.
+- **Your price, not theirs:** the copy fills at the price available when the bot processes the trade, plus fees,
+  slippage for your size and network fee. The activity log shows the detection delay and how your price compared
+  with the trader's. A buy is **rejected with the reason** when it can't be simulated safely: too late (default
+  90 s), no live price, liquidity under your minimum, slippage over your maximum, or a size/exposure limit reached.
+- **Controls per trader:** Copy ON/OFF, Pause/Resume, copy amount, max position size, max exposure, stop-loss,
+  take-profit (and how much to sell there), trailing stop, max holding time, min liquidity, max slippage, max
+  detection delay, copy adds on/off, re-enter after your own rule exited. Plus a total-exposure cap for the whole
+  copy portfolio. **Paused** skips buys but still mirrors sells. **OFF** stops new copies but keeps mirroring exits
+  of copies that are still open.
+- **Independent safety rules** can exit before the trader does; the reason is recorded, and the trader's later sells
+  of that token show "your copy was already closed".
+- **Performance** per trader and for the whole copy portfolio: copied / mirrored / rejected counts, open exposure,
+  unrealized and realized P&L, win rate, average win and loss, profit factor, drawdown, fees and slippage, average
+  detection delay. Kept completely separate from the automatic, strategy and manual paper trading.
+
+Copying starts from the moment you follow: the wallet's earlier trades are never copied, and its sells only mirror
+positions the bot copied. Scanning uses Helius credits (about one call per wallet per scan, default every 30 s,
+plus one per transaction); the interval is in Copy Trading › Settings.
 
 ### 🧪 Coin Check & Paper Trade (your own simulated trades)
 
@@ -481,6 +518,7 @@ src/manual.js     Coin Check & Paper Trade: coin lookup, your simulated position
 src/paperbook.js  simulated positions: stop-loss, take-profit, trailing stop, partial sells, P&L, history
 src/candles.js    chart candles: the bot's live trades + GeckoTerminal OHLCV
 src/strategy/     Setuh setups (setups.js, pure rules) and their own paper engine (engine.js)
+src/copy/         copy trading: classify.js (what a wallet's transaction really was) and engine.js (mirroring)
 src/paper.js      automatic paper trading that follows alerts (System A)
 src/health.js     API health, background jobs, database health
 src/analytics.js  dashboard headline numbers

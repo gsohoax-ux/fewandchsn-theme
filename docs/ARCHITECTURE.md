@@ -26,8 +26,10 @@ PumpPortal WS ─ feed.js ─► engine.js (discovery, scoring, alerts) ──�
                  │            ├─► paper.js            SYSTEM A: automatic paper trading (alerts)
                  │            └─► strategy/engine.js  SYSTEM B: Setuh strategy paper trading
                  │                                       └─ paperbook.js (book "strategy")
-                 └──────────► manual.js               Coin Check & Paper Trade
-                                                        └─ paperbook.js (book "manual")
+                 ├──────────► manual.js               Coin Check & Paper Trade
+                 │                                      └─ paperbook.js (book "manual")
+                 └──────────► copy/engine.js          Copy Trading (account trades + Helius confirmation)
+                                                        └─ paperbook.js (book "copy")
 candles.js   GeckoTerminal OHLCV + candles built from recorded live trades (charts, migrated setups)
 deepcheck.js full single-coin safety check (Helius + DexScreener + RugCheck)
 health.js    per-provider API health, background-job status, database health
@@ -92,19 +94,33 @@ server.js    HTTP API + static app (public/index.html, public/app/*.js)
 Search by address or link → full deep check (all existing checks) → large live chart → manual paper
 positions with stop-loss, take-profit, trailing stop, partial and full sells, and trade history.
 
-## 4. Two independent paper-trading systems
+## 4. Copy trading (System D)
 
-| | System A (automatic, existing) | System B (Setuh strategy) | Manual |
-|---|---|---|---|
-| Module | `paper.js` | `strategy/engine.js` + `paperbook.js` book `strategy` | `manual.js` + `paperbook.js` book `manual` |
-| Entries | Every alert | Setup signals | You |
-| Budget | `PAPER_DAILY_USD` (30) | `STRATEGY_DAILY_USD` (50) | Per position |
-| Exits | −35% stop, trailing, 92% curve, graduation, stall, max hold, runner, moonbag | Per-setup stop/target/time stop | Your stop / target / trail / sells |
-| Storage | `paper_trades`, kv `paper` | `sim_positions`/`sim_fills` where book = `strategy`, `strategy_signals` | `sim_*` where book = `manual` |
+`copy/classify.js` turns a confirmed transaction (`getTransaction`, jsonParsed) into what the wallet did per token,
+using only on-chain facts: `meta.err`, the wallet's pre/post token balances, its SOL change (fee added back), wrapped
+SOL / USDC / USDT as payment, and the DEX programs that ran (top-level, inner instructions and logs). Buys, adds, sells
+(with the exact % of the balance), exits and token-to-token routes are copied; transfers, funding, liquidity moves,
+failed and unclear transactions are recorded and skipped.
+
+`copy/engine.js` gets signatures from PumpPortal `subscribeAccountTrade` (instant) and from Helius
+`getSignaturesForAddress` polling (complete, any DEX), confirms each with `getTransaction` (retrying ones not yet
+indexed), and acts once per wallet + signature + token (`copy_events` primary key, plus fill idempotency keys).
+Buys use a fixed $ amount with position, trader and portfolio caps, delay, liquidity and slippage limits; sells
+mirror the trader's % on the copy. Without Helius it runs on the feed alone and says so.
+
+## 5. Independent paper-trading systems
+
+| | System A (automatic, existing) | System B (Setuh strategy) | Manual | System D (copy) |
+|---|---|---|---|---|
+| Module | `paper.js` | `strategy/engine.js` + `paperbook.js` book `strategy` | `manual.js` + `paperbook.js` book `manual` | `copy/engine.js` + book `copy` |
+| Entries | Every alert | Setup signals | You | Followed wallets' buys/adds |
+| Budget | `PAPER_DAILY_USD` (30) | `STRATEGY_DAILY_USD` (50) | Per position | $ per buy + exposure caps |
+| Exits | −35% stop, trailing, 92% curve, graduation, stall, max hold, runner, moonbag | Per-setup stop/target/time stop | Your stop / target / trail / sells | Mirrored sells + optional own rules |
+| Storage | `paper_trades`, kv `paper` | `sim_positions`/`sim_fills` where book = `strategy`, `strategy_signals` | `sim_*` where book = `manual` | `sim_*` book `copy`, `copy_traders`, `copy_events` |
 
 A book only ever loads and manages rows with its own book name.
 
-## 5. Data integrity rules
+## 6. Data integrity rules
 
 - Prices, liquidity and candles come only from PumpPortal trades, DexScreener or GeckoTerminal. When none
   is available the UI shows "unavailable" and marks stale data with its age.
@@ -113,11 +129,13 @@ A book only ever loads and manages rows with its own book name.
 - Every open, sell, rule change and strategy config change is written to `audit_log`.
 - Historical numbers are labelled "past results"; nothing shows a projected multiple as a likely outcome.
 
-## 6. Known limitations
+## 7. Known limitations
 
 - GeckoTerminal's free API allows about 30 requests a minute, so charts cache for 15–60 s and migrated-coin
   scanning is queued. Coins too new for GeckoTerminal fall back to candles built from the trades the bot
   recorded live (only from the moment the bot started watching the coin).
 - Buy/sell counts are shown when the provider reports them (GeckoTerminal pool data, or the bot's own
   feed for bonding-curve coins).
+- Copy trading sees what a wallet does on-chain; it can't see orders on centralized exchanges or trades from other
+  wallets the same person controls. A copy always fills after the trader, usually at a worse price.
 - Wallet labels ("tracked developer") are only as good as the bot's history plus wallets you add.

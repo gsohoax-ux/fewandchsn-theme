@@ -43,6 +43,13 @@ export class Store {
         id TEXT PRIMARY KEY, setup TEXT, mint TEXT, symbol TEXT, at INTEGER, status TEXT, regime TEXT, data TEXT);
       CREATE INDEX IF NOT EXISTS strategy_signals_at ON strategy_signals(at);
       CREATE INDEX IF NOT EXISTS strategy_signals_setup ON strategy_signals(setup, mint, at);
+      -- Copy trading: followed wallets and every transaction seen for them (one row per wallet + signature + token)
+      CREATE TABLE IF NOT EXISTS copy_traders (
+        wallet TEXT PRIMARY KEY, label TEXT, enabled INTEGER, paused INTEGER, settings TEXT, added_at INTEGER, last_sig TEXT);
+      CREATE TABLE IF NOT EXISTS copy_events (
+        id TEXT PRIMARY KEY, wallet TEXT, signature TEXT, mint TEXT, kind TEXT, action TEXT, at INTEGER, data TEXT);
+      CREATE INDEX IF NOT EXISTS copy_events_at ON copy_events(at);
+      CREATE INDEX IF NOT EXISTS copy_events_wallet ON copy_events(wallet, at);
       CREATE TABLE IF NOT EXISTS audit_log (
         id INTEGER PRIMARY KEY AUTOINCREMENT, at INTEGER, actor TEXT, book TEXT, action TEXT, detail TEXT);
       CREATE INDEX IF NOT EXISTS audit_log_at ON audit_log(at);
@@ -106,6 +113,18 @@ export class Store {
                     ON CONFLICT(id) DO UPDATE SET status = excluded.status, data = excluded.data`),
       sigRecent: q(`SELECT * FROM strategy_signals ORDER BY at DESC LIMIT ?`),
       sigCounts: q(`SELECT setup, status, COUNT(*) n FROM strategy_signals WHERE at >= ? GROUP BY setup, status`),
+      ctUpsert: q(`INSERT INTO copy_traders (wallet, label, enabled, paused, settings, added_at, last_sig) VALUES (?,?,?,?,?,?,?)
+                   ON CONFLICT(wallet) DO UPDATE SET label = excluded.label, enabled = excluded.enabled, paused = excluded.paused, settings = excluded.settings`),
+      ctAll: q(`SELECT * FROM copy_traders ORDER BY added_at`),
+      ctDel: q(`DELETE FROM copy_traders WHERE wallet = ?`),
+      ctLastSig: q(`UPDATE copy_traders SET last_sig = ? WHERE wallet = ?`),
+      ceClaim: q(`INSERT OR IGNORE INTO copy_events (id, wallet, signature, mint, kind, action, at, data) VALUES (?,?,?,?,?,?,?,?)`),
+      ceUpdate: q(`UPDATE copy_events SET kind = ?, action = ?, data = ? WHERE id = ?`),
+      ceRecent: q(`SELECT data FROM copy_events ORDER BY at DESC LIMIT ?`),
+      ceRecentFor: q(`SELECT data FROM copy_events WHERE wallet = ? ORDER BY at DESC LIMIT ?`),
+      ceCounts: q(`SELECT wallet, action, COUNT(*) n FROM copy_events GROUP BY wallet, action`),
+      ceSeen: q(`SELECT 1 FROM copy_events WHERE wallet = ? AND signature = ? LIMIT 1`),
+      cePrune: q(`DELETE FROM copy_events WHERE at < ? AND action = 'ignored'`),
       audit: q(`INSERT INTO audit_log (at, actor, book, action, detail) VALUES (?,?,?,?,?)`),
       auditRecent: q(`SELECT * FROM audit_log ORDER BY id DESC LIMIT ?`),
       pruneAudit: q(`DELETE FROM audit_log WHERE at < ?`),
@@ -234,6 +253,26 @@ export class Store {
   }
   signalCounts(sinceMs = 0) { return this.s.sigCounts.all(sinceMs); }
 
+  // ---- copy trading ----
+  saveCopyTrader(t) {
+    this.s.ctUpsert.run(t.wallet, t.label ?? '', t.enabled ? 1 : 0, t.paused ? 1 : 0, JSON.stringify(t.settings ?? {}), t.addedAt ?? Date.now(), t.lastSig ?? null);
+  }
+  copyTraders() {
+    return this.s.ctAll.all().map((r) => ({ wallet: r.wallet, label: r.label, enabled: Boolean(r.enabled), paused: Boolean(r.paused),
+      settings: (() => { try { return JSON.parse(r.settings); } catch { return {}; } })(), addedAt: r.added_at, lastSig: r.last_sig }));
+  }
+  removeCopyTrader(wallet) { this.s.ctDel.run(wallet); }
+  setCopyLastSig(wallet, sig) { this.s.ctLastSig.run(sig, wallet); }
+  /** Reserve an event id. Returns false if this wallet + signature + token was already handled (no double copies). */
+  claimCopyEvent(ev) { return this.s.ceClaim.run(ev.id, ev.wallet, ev.signature, ev.mint ?? '', ev.kind, ev.action, ev.at, JSON.stringify(ev)).changes > 0; }
+  updateCopyEvent(ev) { this.s.ceUpdate.run(ev.kind, ev.action, JSON.stringify(ev), ev.id); }
+  copySignatureSeen(wallet, sig) { return Boolean(this.s.ceSeen.get(wallet, sig)); }
+  copyEvents(limit = 200, wallet = null) {
+    const rows = wallet ? this.s.ceRecentFor.all(wallet, limit) : this.s.ceRecent.all(limit);
+    return rows.map((r) => { try { return JSON.parse(r.data); } catch { return null; } }).filter(Boolean);
+  }
+  copyEventCounts() { return this.s.ceCounts.all(); }
+
   // ---- audit log ----
   audit(actor, book, action, detail = {}) {
     try { this.s.audit.run(Date.now(), actor, book ?? '', action, JSON.stringify(detail)); } catch { /* never block on the audit log */ }
@@ -280,6 +319,7 @@ export class Store {
 
   pruneOld(days = 14) {
     this.s.pruneAudit.run(Date.now() - 90 * 86400_000);
+    this.s.cePrune.run(Date.now() - 14 * 86400_000);
     this.s.pruneSignals.run(Date.now() - 14 * 86400_000);
     this.s.prune.run(Date.now() - days * 86400_000);
     this.s.pruneSamples.run(Date.now() - 60 * 86400_000);

@@ -11,6 +11,9 @@ export class PumpPortalFeed extends EventEmitter {
     this.watched = new Set();
     this.pendingSub = new Set();
     this.pendingUnsub = new Set();
+    this.accounts = new Set();      // wallets followed for copy trading (subscribeAccountTrade)
+    this.pendingAccSub = new Set();
+    this.pendingAccUnsub = new Set();
     this.connected = false;
     this.backoff = 1000;
     this.lastMsgAt = 0;
@@ -61,6 +64,7 @@ export class PumpPortalFeed extends EventEmitter {
       ws.send(JSON.stringify({ method: 'subscribeNewToken' }));
       ws.send(JSON.stringify({ method: 'subscribeMigration' }));
       for (const m of this.watched) this.pendingSub.add(m);
+      for (const a of this.accounts) this.pendingAccSub.add(a);
     };
     ws.onmessage = (ev) => {
       this.lastMsgAt = Date.now();
@@ -85,6 +89,9 @@ export class PumpPortalFeed extends EventEmitter {
 
   watch(mint) { this.watched.add(mint); this.pendingUnsub.delete(mint); this.pendingSub.add(mint); }
   unwatch(mint) { this.watched.delete(mint); this.pendingSub.delete(mint); this.pendingUnsub.add(mint); }
+  /** Follow every trade a wallet makes (copy trading). */
+  watchAccount(w) { this.accounts.add(w); this.pendingAccUnsub.delete(w); this.pendingAccSub.add(w); }
+  unwatchAccount(w) { this.accounts.delete(w); this.pendingAccSub.delete(w); this.pendingAccUnsub.add(w); }
 
   #flush() {
     if (!this.connected || this.ws?.readyState !== WebSocket.OPEN) return;
@@ -96,6 +103,8 @@ export class PumpPortalFeed extends EventEmitter {
     };
     if (this.pendingSub.size) send('subscribeTokenTrade', this.pendingSub);
     if (this.pendingUnsub.size) send('unsubscribeTokenTrade', this.pendingUnsub);
+    if (this.pendingAccSub.size) send('subscribeAccountTrade', this.pendingAccSub);
+    if (this.pendingAccUnsub.size) send('unsubscribeAccountTrade', this.pendingAccUnsub);
   }
 }
 
@@ -127,12 +136,18 @@ export class DemoChain {
   async isService() { return false; }
 }
 
+/** Demo wallets that trade like a real trader: buy, add, sell in parts, exit, sometimes re-enter. */
+export const DEMO_TRADERS = ['DemoSmartTrader1111111111111111111111111111', 'DemoQuickTrader2222222222222222222222222222'];
+
 export class DemoFeed extends EventEmitter {
   constructor(chain, log = console, xSource = null) {
-    super(); this.chain = chain; this.log = log; this.xSource = xSource; this.watched = new Set(); this.connected = true;
+    super(); this.chain = chain; this.log = log; this.xSource = xSource; this.watched = new Set(); this.accounts = new Set(); this.connected = true;
+    this.demoTraders = DEMO_TRADERS;
   }
   watch(m) { this.watched.add(m); }
   unwatch(m) { this.watched.delete(m); }
+  watchAccount(w) { this.accounts.add(w); }
+  unwatchAccount(w) { this.accounts.delete(w); }
 
   start() {
     this.log.info('DEMO MODE - simulated coins, not real');
@@ -168,7 +183,7 @@ export class DemoFeed extends EventEmitter {
       bal.set(trader, Math.max(0, (bal.get(trader) ?? 0) + (side === 'buy' ? tokens : -tokens)));
       const signature = rid(88);
       slots.set(signature, atSlot);
-      if (!this.watched.has(mint)) return;
+      if (!this.watched.has(mint) && !this.accounts.has(trader)) return;
       this.emit('trade', { signature, mint, traderPublicKey: trader, txType: side, tokenAmount: tokens,
         solAmount: sol, newTokenBalance: bal.get(trader), vTokensInBondingCurve: vTokens,
         vSolInBondingCurve: vSol, marketCapSol: (vSol / vTokens) * 1e9 });
@@ -212,12 +227,19 @@ export class DemoFeed extends EventEmitter {
       organic.push(w); return w;
     };
     const washers = [rid(), rid(), rid()];
+    // a demo "smart" trader joins some coins and trades the full cycle
+    const pro = scenario !== 'dead' && Math.random() < 0.55 ? pick(DEMO_TRADERS) : null;
+    const plan = pro ? { 6: ['buy', rnd(1, 3)], 18: ['buy', rnd(0.5, 1.5)], 40: ['sellPct', 0.25], 65: ['sellPct', 0.5], 95: ['sellPct', 1],
+      ...(Math.random() < 0.5 ? { 110: ['buy', rnd(0.5, 1)], 140: ['sellPct', 1] } : {}) } : {};
     let step = 0;
     const maxSteps = scenario === 'dead' ? 6 : scenario === 'runner' ? 400 : 160;
     const tick = () => {
       step++;
       if (step > maxSteps) return;
       let res;
+      const p = plan[step];
+      if (p) res = p[0] === 'buy' ? trade(pro, 'buy', p[1]) : trade(pro, 'sell', (bal.get(pro) ?? 0) * p[1]);
+      if (res === 'done') return;
       if (scenario === 'dead') { if (Math.random() < 0.5) res = trade(newWallet(), 'buy', rnd(0.05, 0.3)); }
       else if (scenario === 'wash') {
         const w = pick(washers);

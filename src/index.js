@@ -18,6 +18,8 @@ import { ManualPaper } from './manual.js';
 import { Health } from './health.js';
 import { CandleService } from './candles.js';
 import { StrategyEngine } from './strategy/engine.js';
+import { CopyEngine } from './copy/engine.js';
+import { DEMO_TRADERS } from './feed.js';
 
 // Health monitor first: every outbound request from here on is counted by provider
 const health = new Health();
@@ -103,6 +105,14 @@ const candles = new CandleService({ engine, log });
 // Strategy section (System B): Setuh setups with their own paper book and budget
 const strategy = cfg.strategyEnabled ? new StrategyEngine({ cfg, engine, store, feed, candles, log }) : null;
 strategy?.start(health);
-startServer({ engine, store, cfg, deepcheck, manual, strategy, candles, health, paper, trends, log });
+// Copy trading (System D): mirror followed wallets' buys, adds, partial sells and exits in its own paper book
+const copy = new CopyEngine({ cfg, store, engine, feed, chain: cfg.demo ? null : chain, log });
+if (cfg.demo && !copy.traders.size) {
+  for (const [i, w] of DEMO_TRADERS.entries()) {
+    try { copy.addTrader(w, { label: i ? 'Demo quick trader' : 'Demo smart trader' }); } catch (e) { log.warn(`demo copy trader: ${e.message}`); }
+  }
+}
+copy.start(health);
+startServer({ engine, store, cfg, deepcheck, manual, strategy, candles, health, paper, trends, copy, log });
 telegram.poll();
 notifier.info(`🤖 Memecoin bot is running${cfg.demo ? ' (DEMO - fake coins)' : ''}. You'll get alerts here.`);

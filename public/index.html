@@ -169,7 +169,7 @@ details > summary::-webkit-details-marker { display: none; }
 .log { list-style: none; margin: 0; padding: 0; max-height: 380px; overflow: auto; font: 11.5px/1.5 var(--mono); }
 .log li { padding: 4px 14px; border-bottom: 1px solid var(--border); }
 .log .a { font-weight: 700; margin-right: 6px; }
-.a-FILTER { color: #f39c4a; } .a-ANALYST { color: #a990ff; } .a-ALERT { color: var(--up); } .a-EXECUTOR { color: #4cd6c0; } .a-RISK { color: #d27bff; } .a-WATCH { color: var(--warn); } .a-RADAR { color: var(--info); }
+.a-FILTER { color: #f39c4a; } .a-ANALYST { color: #a990ff; } .a-ALERT { color: var(--up); } .a-EXECUTOR { color: #4cd6c0; } .a-RISK { color: #d27bff; } .a-COPY { color: #f78fd4; } .a-WATCH { color: var(--warn); } .a-RADAR { color: var(--info); }
 .l-bad { color: var(--down); } .l-good { color: var(--up); } .l-muted { color: var(--muted); }
 
 /* chart */
@@ -235,7 +235,7 @@ dialog::backdrop { background: rgba(0,0,0,.6); }
   .subtabs::-webkit-scrollbar { display: none; }
   .subtabs button { border: 1px solid var(--border); background: none; border-radius: 99px; padding: 5px 12px; font-size: 12px; color: var(--muted); white-space: nowrap; cursor: pointer; }
   .subtabs button.on { background: var(--accent-soft); color: var(--text); border-color: rgba(109,141,255,.5); }
-  .bottomnav { display: grid; grid-template-columns: repeat(3, 1fr); position: fixed; left: 0; right: 0; bottom: 0; z-index: 30; background: rgba(17,20,26,.97); border-top: 1px solid var(--border); padding-bottom: env(safe-area-inset-bottom); }
+  .bottomnav { display: grid; grid-template-columns: repeat(4, 1fr); position: fixed; left: 0; right: 0; bottom: 0; z-index: 30; background: rgba(17,20,26,.97); border-top: 1px solid var(--border); padding-bottom: env(safe-area-inset-bottom); }
   .bottomnav button { border: 0; background: none; color: var(--muted); padding: 8px 4px 9px; display: flex; flex-direction: column; align-items: center; gap: 3px; font-size: 10.5px; font-weight: 600; cursor: pointer; }
   .bottomnav svg { width: 20px; height: 20px; }
   .bottomnav button.on { color: var(--text); }
@@ -272,6 +272,7 @@ dialog::backdrop { background: rgba(0,0,0,.6); }
       <section id="view-dashboard" hidden></section>
       <section id="view-strategy" hidden></section>
       <section id="view-trade" hidden></section>
+      <section id="view-copy" hidden></section>
     </main>
   </div>
 </div>

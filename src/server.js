@@ -52,7 +52,7 @@ const APP_FILE_RE = /^\/app\/([a-z0-9-]+\.js)$/;
 class HttpError extends Error { constructor(status, msg) { super(msg); this.status = status; } }
 const bad = (msg) => new HttpError(400, msg);
 
-export function startServer({ engine, store, cfg, deepcheck = null, manual = null, strategy = null, candles = null, health = null, paper = null, trends = null, log = console }) {
+export function startServer({ engine, store, cfg, deepcheck = null, manual = null, strategy = null, candles = null, health = null, paper = null, trends = null, copy = null, log = console }) {
   const token = cfg.dashboardPassword
     ? createHmac('sha256', cfg.dashboardPassword).update('memecoin-bot-session-v1').digest('hex') : '';
   const same = (a, b) => { const x = Buffer.from(a), y = Buffer.from(b); return x.length === y.length && timingSafeEqual(x, y); };
@@ -102,7 +102,7 @@ export function startServer({ engine, store, cfg, deepcheck = null, manual = nul
       alerts: store.recentAlerts(40), stats: store.stats(),
       runners: [...engine.coins.values()].filter((c) => c.result?.runner?.is && !c.migrated).sort((a, b) => b.result.runner.score - a.result.runner.score).slice(0, 8).map((c) => engine.coinView(c)),
     }),
-    'GET /api/analytics': () => analytics({ engine, store, paper, manual, strategy, trends }),
+    'GET /api/analytics': () => analytics({ engine, store, paper, manual, strategy, trends, copy }),
     'GET /api/learning': () => ({ status: engine.learner?.status() ?? null, report: store.learningReport(cfg.learnTarget), regime: engine.regime(),
       themes: engine.trendsTracker.hotThemes(), recentRunners: engine.trendsTracker.recentRunners?.().slice?.(0, 12) ?? [],
       alerts: store.stats(), strategy: strategy ? strategy.performance() : null }),
@@ -139,6 +139,12 @@ export function startServer({ engine, store, cfg, deepcheck = null, manual = nul
     'POST /api/strategy/reset': (url, b) => need(strategy, 'Strategy').resetSetup(String(b.setup ?? '')),
     'POST /api/strategy/devs': (url, b) => need(strategy, 'Strategy').setTrackedDev(String(b.wallet ?? '').trim(), { mode: b.mode, label: b.label ?? '' }),
     'POST /api/strategy/sell': (url, b) => need(strategy, 'Strategy').sellManually(String(b.id ?? ''), b.pct, reqId(b.requestId)),
+    'GET /api/copy': () => need(copy, 'Copy trading').view(),
+    'POST /api/copy/follow': (url, b) => need(copy, 'Copy trading').addTrader(String(b.wallet ?? '').trim(), { label: b.label ?? '', settings: b.settings ?? {} }),
+    'POST /api/copy/trader': (url, b) => need(copy, 'Copy trading').updateTrader(String(b.wallet ?? ''), { label: b.label, enabled: b.enabled, paused: b.paused, settings: b.settings }),
+    'POST /api/copy/unfollow': (url, b) => { need(copy, 'Copy trading').removeTrader(String(b.wallet ?? '')); return { ok: true }; },
+    'POST /api/copy/settings': (url, b) => need(copy, 'Copy trading').updateSettings(b.values ?? {}),
+    'POST /api/copy/sell': (url, b) => need(copy, 'Copy trading').sellManually(String(b.id ?? ''), b.pct, reqId(b.requestId)),
     'GET /api/audit': () => store.recentAudit(200),
   };
 

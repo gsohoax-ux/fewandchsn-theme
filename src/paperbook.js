@@ -48,7 +48,7 @@ export class PaperBook {
    * book: 'manual' | 'strategy'. getSolUsd: () => SOL price. onEvent(evt): optional, called on fills.
    */
   constructor({ store, cfg, book, getSolUsd = () => 0, onEvent = null, log = console, now = () => Date.now() }) {
-    if (!['manual', 'strategy'].includes(book)) throw new Error(`unknown book ${book}`);
+    if (!['manual', 'strategy', 'copy'].includes(book)) throw new Error(`unknown book ${book}`);
     Object.assign(this, { store, cfg, book, getSolUsd, onEvent, log, now });
     this.open = new Map(this.store.simPositions(book, 'open').map((p) => [p.id, p]));
     this.busy = new Set(); // positions with a sell in progress (no overlapping executions)
@@ -80,30 +80,67 @@ export class PaperBook {
       priceUsd: snap.priceUsd, mcUsd: snap.mcUsd, source: snap.source ?? '', lastAt: now,
       budgetUsd, openedAt: now, closedAt: null, exitReason: null, meta,
     };
-    const depth = this.depth(pos, budgetUsd);
-    if (depth === 0) throw new Error('This coin has no liquidity pool to trade against, so a buy (or a later sale) would not fill');
-    const impactPct = depth ? priceImpact(budgetUsd, depth).avgPct : 0;
-    const mevPct = this.cfg.paperMevPct ?? 2;
-    const txUsd = this.#txUsd();
-    const feeUsd = Math.max(0, budgetUsd - txUsd) * (this.#feePct() / 100);
-    const spendable = Math.max(0, budgetUsd - txUsd - feeUsd);
-    const tokens = spendable / snap.priceUsd / (1 + (impactPct + mevPct) / 100);
-    const slippageUsd = spendable - tokens * snap.priceUsd;
+    const b = this.#buyFill(pos, budgetUsd, snap.priceUsd);
     Object.assign(pos, {
-      tokensInit: tokens, tokens, refPriceUsd: snap.priceUsd, entryPriceUsd: budgetUsd / tokens, entryMcUsd: snap.mcUsd,
-      entrySlipPct: impactPct + mevPct, depthKnown: depth != null,
-      realizedUsd: 0, soldCostUsd: 0, feesUsd: feeUsd + txUsd, slippageUsd,
+      tokensInit: b.tokens, tokens: b.tokens, costOpenUsd: budgetUsd, refPriceUsd: snap.priceUsd, entryPriceUsd: budgetUsd / b.tokens, entryMcUsd: snap.mcUsd,
+      entrySlipPct: b.slipPct, depthKnown: b.depthKnown,
+      realizedUsd: 0, soldCostUsd: 0, feesUsd: b.feesUsd, slippageUsd: b.slippageUsd,
       peakPriceUsd: snap.priceUsd, lowPriceUsd: snap.priceUsd, trailHighUsd: snap.priceUsd,
       history: [[now, snap.priceUsd]], fills: [],
     });
     pos.risk = normalizeRisk(risk, snap.priceUsd);
-    pos.fills.push({ at: now, kind: 'buy', reason: origin === 'manual' ? 'Manual buy' : `Strategy entry (${origin})`, pct: 100, tokens,
-      priceUsd: snap.priceUsd, grossUsd: budgetUsd, feesUsd: feeUsd + txUsd, slippageUsd, netUsd: -budgetUsd, mcUsd: snap.mcUsd });
+    pos.fills.push({ at: now, kind: 'buy', reason: meta.buyReason ?? (origin === 'manual' ? 'Manual buy' : `Strategy entry (${origin})`), pct: 100, tokens: b.tokens,
+      priceUsd: snap.priceUsd, grossUsd: budgetUsd, feesUsd: b.feesUsd, slippageUsd: b.slippageUsd, netUsd: -budgetUsd, mcUsd: snap.mcUsd });
     this.store.addSimFill(this.book, { positionId: pos.id, idemKey: `${pos.id}:open`, ...pos.fills[0] });
     this.open.set(pos.id, pos);
     this.#save(pos);
     this.store.audit(origin === 'manual' ? 'user' : 'system', this.book, 'open', { id: pos.id, mint: pos.mint, budgetUsd, priceUsd: snap.priceUsd, risk: pos.risk });
     return pos;
+  }
+
+  /** Tokens a buy of budgetUsd gets at priceUsd after fees, network fee, price impact and sandwich losses. */
+  #buyFill(pos, budgetUsd, priceUsd) {
+    const depth = this.depth({ ...pos, priceUsd }, budgetUsd);
+    if (depth === 0) throw new Error('This coin has no liquidity pool to trade against, so a buy (or a later sale) would not fill');
+    const impactPct = depth ? priceImpact(budgetUsd, depth).avgPct : 0;
+    const slipPct = impactPct + (this.cfg.paperMevPct ?? 2);
+    const txUsd = this.#txUsd();
+    const feeUsd = Math.max(0, budgetUsd - txUsd) * (this.#feePct() / 100);
+    const spendable = Math.max(0, budgetUsd - txUsd - feeUsd);
+    const tokens = spendable / priceUsd / (1 + slipPct / 100);
+    return { tokens, slipPct, feesUsd: feeUsd + txUsd, slippageUsd: spendable - tokens * priceUsd, depthKnown: depth != null };
+  }
+
+  /**
+   * Buy more into an open position (average-cost accounting). The current market state in `snap`
+   * is applied first, so the add fills at today's price, not the original entry.
+   */
+  addToPosition(id, { snap, budgetUsd, reason = 'Added to position', idemKey = null, actor = 'system' }) {
+    const pos = this.#get(id);
+    budgetUsd = Number(budgetUsd);
+    if (!(budgetUsd >= 1 && budgetUsd <= 1_000_000)) throw new Error('Add amount must be between $1 and $1,000,000');
+    if (!(snap?.priceUsd > 0)) throw new Error('No live price for this coin, so a simulated buy is not possible');
+    this.updatePrice(pos.mint, snap);
+    if (pos.status !== 'open') throw new Error('Position closed while updating the price');
+    const b = this.#buyFill(pos, budgetUsd, snap.priceUsd);
+    const now = this.now();
+    const fill = { at: now, kind: 'buy', reason, pct: null, tokens: b.tokens, priceUsd: snap.priceUsd, grossUsd: budgetUsd,
+      feesUsd: b.feesUsd, slippageUsd: b.slippageUsd, netUsd: -budgetUsd, mcUsd: snap.mcUsd };
+    if (!this.store.addSimFill(this.book, { positionId: pos.id, idemKey: idemKey ?? `${pos.id}:add:${now}`, ...fill })) return { duplicate: true, position: pos };
+    // market reference price for % stops/targets: token-weighted average of the market prices paid
+    pos.refPriceUsd = (pos.refPriceUsd * pos.tokens + snap.priceUsd * b.tokens) / (pos.tokens + b.tokens);
+    pos.tokens += b.tokens;
+    pos.tokensInit += b.tokens;
+    pos.budgetUsd += budgetUsd;
+    pos.costOpenUsd = (pos.costOpenUsd ?? pos.budgetUsd - budgetUsd - pos.soldCostUsd) + budgetUsd;
+    pos.entryPriceUsd = pos.costOpenUsd / pos.tokens;
+    pos.feesUsd += b.feesUsd;
+    pos.slippageUsd += b.slippageUsd;
+    pos.fills.push(fill);
+    this.#save(pos);
+    this.store.audit(actor, this.book, 'add', { id: pos.id, mint: pos.mint, budgetUsd, priceUsd: snap.priceUsd, reason });
+    this.onEvent?.({ type: 'buy', book: this.book, position: pos, fill });
+    return { duplicate: false, position: pos, fill };
   }
 
   /** Change stop / target / trail on an open position (null or '' clears a setting). */
@@ -155,7 +192,10 @@ export class PaperBook {
       if (!this.store.addSimFill(this.book, { positionId: pos.id, idemKey: key, ...fill })) {
         return { duplicate: true, position: pos };
       }
-      const costShare = pos.budgetUsd * (tokens / pos.tokensInit);
+      // average cost: the share of the open cost basis that these tokens carry
+      const costOpen = pos.costOpenUsd ?? pos.budgetUsd - pos.soldCostUsd;
+      const costShare = costOpen * Math.min(1, tokens / pos.tokens);
+      pos.costOpenUsd = Math.max(0, costOpen - costShare);
       pos.tokens = Math.max(0, pos.tokens - tokens);
       pos.realizedUsd += q.netUsd;
       pos.soldCostUsd += costShare;
@@ -242,7 +282,7 @@ export class PaperBook {
   /** Value now: market value, what selling all would bring, realized and unrealized P&L. */
   value(pos) {
     const q = pos.tokens > 0 ? this.quoteSell(pos, pos.tokens) : { grossUsd: 0, netUsd: 0, slipPct: 0 };
-    const costOpen = pos.budgetUsd - pos.soldCostUsd;
+    const costOpen = pos.costOpenUsd ?? pos.budgetUsd - pos.soldCostUsd;
     const unrealizedUsd = q.netUsd - costOpen;
     const realizedPnlUsd = pos.realizedUsd - pos.soldCostUsd;
     const totalPnlUsd = pos.realizedUsd + q.netUsd - pos.budgetUsd;

@@ -2,7 +2,7 @@
 // Each paper-trading system is reported separately; nothing is mixed.
 import { tradeStats } from './paperbook.js';
 
-export function analytics({ engine, store, paper = null, manual = null, strategy = null, trends = null, now = Date.now() }) {
+export function analytics({ engine, store, paper = null, manual = null, strategy = null, trends = null, copy = null, now = Date.now() }) {
   const s = engine.status();
   const coins = [...engine.coins.values()];
   const scored = coins.filter((c) => c.result);
@@ -30,6 +30,7 @@ export function analytics({ engine, store, paper = null, manual = null, strategy
     auto: a ? { label: 'Automatic (alerts)', today: a.winLoss?.today ?? null, allTime: a.winLoss?.allTime ?? null, pnlAllTimeUsd: a.allTime?.pnlUsd ?? null,
       open: a.open.length, ...pick(tradeStats(autoClosed), ['trades', 'winRate', 'profitFactor', 'profitFactorInfinite', 'avgReturnPct', 'maxDrawdownUsd', 'netUsd']) } : null,
     strategy: strategy ? { label: 'Strategy (Setuh)', open: strategy.book.open.size, ...pick(strategy.book.summary(), ['trades', 'winRate', 'profitFactor', 'profitFactorInfinite', 'avgReturnPct', 'maxDrawdownUsd', 'netUsd', 'pnlUsd']) } : null,
+    copy: copy ? { label: 'Copy trading', open: copy.book.open.size, traders: copy.traders.size, ...pick(copy.book.summary(), ['trades', 'winRate', 'profitFactor', 'profitFactorInfinite', 'avgReturnPct', 'maxDrawdownUsd', 'netUsd', 'pnlUsd']) } : null,
     manual: manual ? { label: 'Manual', open: manual.book.open.size, ...pick(manual.book.summary(), ['trades', 'winRate', 'profitFactor', 'profitFactorInfinite', 'avgReturnPct', 'maxDrawdownUsd', 'netUsd', 'pnlUsd']) } : null,
   };
 }

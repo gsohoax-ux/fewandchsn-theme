@@ -3,12 +3,14 @@ import { $, $$, esc, ICONS, onState, store } from './core.js';
 import * as dashboard from './dashboard.js';
 import * as strategy from './strategy.js';
 import * as trade from './trade.js';
+import * as copy from './copy.js';
 import { setTradeOpener } from './coin.js';
 
 const SECTIONS = [
   { id: 'dashboard', title: 'Dashboard', short: 'Dashboard', mod: dashboard, icon: ICONS.dashboard },
   { id: 'strategy', title: 'Strategy', short: 'Strategy', mod: strategy, icon: ICONS.strategy },
   { id: 'trade', title: 'Coin Check & Paper Trade', short: 'Coin Check', mod: trade, icon: ICONS.trade },
+  { id: 'copy', title: 'Copy Trading', short: 'Copy', mod: copy, icon: ICONS.copy },
 ];
 let current = null;
 
