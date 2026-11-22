@@ -60,6 +60,7 @@ export class PaperBook {
 
   /** Pool depth in $ (null = unknown, 0 = no pool to trade against). */
   depth(pos, orderUsd = 50) {
+    if (!pos.onCurve && pos.liqUsd == null) return null; // pool liquidity not known (yet): unknown, not zero
     const L = liquidityRead({ onCurve: pos.onCurve, vSol: pos.vSol, liqUsd: pos.liqUsd ?? 0, mcUsd: pos.mcUsd, solUsd: this.getSolUsd(), orderUsd });
     return L ? L.depthUsd : null;
   }

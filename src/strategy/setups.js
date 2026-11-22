@@ -274,6 +274,32 @@ export function evalMigrated(ctx, cfg) {
   return finish('migrated', conds, { hard: ['age', 'safety'], forming, levels: plan(ctx, cfg, boxLow) });
 }
 
+/**
+ * What each condition is for. gate = must hold for the coin to be tradable at all; pattern = the setup is there;
+ * confirm = the entry trigger (stabilization, sellers exhausted, buyers back, breakout).
+ */
+export const CONDITION_ROLE = {
+  age: 'gate', curve: 'gate', safety: 'gate', bundles: 'gate', narrative: 'gate', notblocked: 'gate', liquidity: 'gate',
+  run: 'pattern', pullback: 'pattern', nochase: 'pattern', high: 'pattern', size: 'pattern', meaningful: 'pattern', reputation: 'pattern',
+  launch: 'pattern', support: 'pattern', insiders: 'pattern',
+  floor: 'confirm', buying: 'confirm', exhausted: 'confirm', demand: 'confirm', stable: 'confirm', range: 'confirm', breakout: 'confirm',
+  sideways: 'confirm', holding: 'confirm',
+};
+
+/**
+ * Turn an evaluation into the trader's decision stage:
+ *   rejected | insufficient_data | waiting_setup | waiting_confirmation | signal | idle
+ */
+export function decisionStage(ev) {
+  if (ev.phase === 'rejected') return 'rejected';
+  if (ev.phase === 'signal') return 'signal';
+  if (ev.phase === 'idle') return 'idle';
+  const by = (role) => ev.conditions.filter((c) => (CONDITION_ROLE[c.key] ?? 'confirm') === role);
+  if (by('gate').some((c) => c.ok === null) || by('pattern').some((c) => c.ok === null)) return 'insufficient_data';
+  if (by('pattern').some((c) => c.ok !== true) || by('gate').some((c) => c.ok !== true)) return 'waiting_setup';
+  return 'waiting_confirmation';
+}
+
 export const EVALUATORS = { newPairs: evalNewPairs, finalA: evalFinalA, finalB: evalFinalB, finalC: evalFinalC, migrated: evalMigrated };
 
 /** Merge saved settings over defaults; only known keys with valid numbers/booleans are accepted. */

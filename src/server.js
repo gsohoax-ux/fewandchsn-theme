@@ -52,7 +52,7 @@ const APP_FILE_RE = /^\/app\/([a-z0-9-]+\.js)$/;
 class HttpError extends Error { constructor(status, msg) { super(msg); this.status = status; } }
 const bad = (msg) => new HttpError(400, msg);
 
-export function startServer({ engine, store, cfg, deepcheck = null, manual = null, strategy = null, candles = null, health = null, paper = null, trends = null, copy = null, log = console }) {
+export function startServer({ engine, store, cfg, deepcheck = null, manual = null, strategy = null, candles = null, health = null, paper = null, trends = null, copy = null, market = null, metrics = null, log = console }) {
   const token = cfg.dashboardPassword
     ? createHmac('sha256', cfg.dashboardPassword).update('memecoin-bot-session-v1').digest('hex') : '';
   const same = (a, b) => { const x = Buffer.from(a), y = Buffer.from(b); return x.length === y.length && timingSafeEqual(x, y); };
@@ -120,8 +120,30 @@ export function startServer({ engine, store, cfg, deepcheck = null, manual = nul
       need(deepcheck, 'Deep check');
       const q = url.searchParams.get('q');
       const mint = q != null && manual ? await manual.resolve(q) : mintParam(url.searchParams.get('mint') ?? q);
-      return deepcheck.check(mint);
+      const t0 = performance.now();
+      const report = await deepcheck.check(mint);
+      metrics?.time('coinCheck', performance.now() - t0, 'Coin Check (manual)');
+      // Setuh strategy compatibility + whether the coin passes the trader's safety gates
+      if (strategy) report.setuh = await strategy.compatibility(mint, report).catch((e) => ({ error: e.message, setups: [] }));
+      // report confidence: how much of the check could actually run (not a safety score)
+      const total = report.checks.length, unknown = report.unknown + report.notes.length;
+      report.reportConfidence = { score: Math.max(0, Math.round(100 * (1 - unknown / Math.max(1, total + report.notes.length)) - (report.verdict === 'UNVERIFIED' ? 25 : 0))),
+        detail: `${total - report.unknown} of ${total} checks ran${report.notes.length ? `; ${report.notes.length} could not run` : ''}${report.verdict === 'UNVERIFIED' ? '; key on-chain checks missing' : ''}` };
+      return report;
     },
+    'GET /api/latency': () => {
+      const s = engine.status();
+      const m = metrics?.view() ?? { timings: {}, rates: {}, gauges: {} };
+      return { ...m, market: market?.view() ?? null, feed: { connected: s.feedConnected, lastDataSec: s.feedLastDataSec, reconnects: s.feedReconnects, problem: s.feedProblem, demo: s.demo },
+        solUsd: s.solUsd, solUsdAgeSec: s.solUsdAgeSec };
+    },
+    'GET /api/setuh': () => need(strategy, 'Setuh trader').view(),
+    'GET /api/setuh/journal': () => need(strategy, 'Setuh trader').journal(400),
+    'POST /api/setuh/submit': (url, b) => need(strategy, 'Setuh trader').submit(mintParam(b.mint)),
+    'POST /api/setuh/unsubmit': (url, b) => { need(strategy, 'Setuh trader').unsubmit(mintParam(b.mint)); return { ok: true }; },
+    'POST /api/setuh/approve': (url, b) => need(strategy, 'Setuh trader').approve(String(b.id ?? '')),
+    'POST /api/setuh/cancel': (url, b) => need(strategy, 'Setuh trader').cancel(String(b.id ?? '')),
+    'POST /api/setuh/close-coin': (url, b) => need(strategy, 'Setuh trader').closeCoin(mintParam(b.mint), reqId(b.requestId)),
     'GET /api/resolve': async (url) => ({ mint: await need(manual, 'Coin check').resolve(String(url.searchParams.get('q') ?? '').slice(0, 500)) }),
     'GET /api/candles': async (url) => {
       const mint = mintParam(url.searchParams.get('mint'));

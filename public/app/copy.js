@@ -23,7 +23,7 @@ let root, sub = 'traders', data = null, filter = '';
 const poll = poller(async () => { data = await api('/api/copy'); if (!root.hidden) render(); }, 3000);
 
 export function mount(el) { root = el; wire(); }
-export function show(s) { sub = SUBS.some(([k]) => k === s) ? s : 'traders'; poll.start(); render(); }
+export function show(s, params = {}) { const v = params.v ?? s; sub = SUBS.some(([k]) => k === v) ? v : (SUBS.some(([k]) => k === sub) ? sub : 'traders'); poll.start(); render(); }
 export function hide() { poll.stop(); }
 
 const short = (w) => `${w.slice(0, 4)}…${w.slice(-4)}`;
@@ -47,7 +47,8 @@ function render() {
       ${kpi('Unrealized P&L', data.open.length ? fmt.signed(P.unrealizedUsd) : '—', '', cls(P.unrealizedUsd))}
       ${kpi('Realized P&L', fmt.signed(P.realizedUsd), `${P.closedCount} closed · win ${P.winRate != null ? P.winRate + '%' : '—'} · PF ${pf}`, cls(P.realizedUsd))}
     </div>`;
-  const body = sub === 'traders' ? traders() : sub === 'activity' ? activity() : sub === 'positions' ? positions() : sub === 'performance' ? performance() : settings();
+  const tabs = `<div class="seg" style="margin-bottom:var(--gap)">${SUBS.map(([k, l]) => `<button data-cv="${k}" class="${k === sub ? 'on' : ''}">${l}</button>`).join('')}</div>`;
+  const body = tabs + (sub === 'traders' ? traders() : sub === 'activity' ? activity() : sub === 'positions' ? positions() : sub === 'performance' ? performance() : settings());
   root.innerHTML = head + body;
 }
 
@@ -108,7 +109,7 @@ function activity() {
       const kind = KIND_LABEL[e.kind] ?? e.kind;
       const did = e.kind === 'sell' && tr?.soldPct != null ? `SELL ${tr.soldPct.toFixed(1)}%` : kind;
       return `<tr><td class="small muted">${fmt.time(e.at)}</td><td class="small">${traderName(e.wallet)}</td>
-        <td class="b">${e.mint ? `<a href="#/trade/workstation?mint=${esc(e.mint)}">${e.symbol ? '$' + esc(e.symbol) : esc(e.mint.slice(0, 6) + '…')}</a>` : '—'}</td>
+        <td class="b">${e.mint ? `<a href="#/check/coin?mint=${esc(e.mint)}">${e.symbol ? '$' + esc(e.symbol) : esc(e.mint.slice(0, 6) + '…')}</a>` : '—'}</td>
         <td><span class="tag ${['buy', 'add'].includes(e.kind) ? 'up' : ['sell', 'exit'].includes(e.kind) ? 'down' : ''}">${esc(did)}</span>${tr?.usd ? `<div class="tiny muted">≈ ${fmt.usd(tr.usd)}</div>` : ''}</td>
         <td class="r num small">${tr && tr.pre != null ? `${fmt.tokens(tr.pre)} → ${fmt.tokens(tr.post)}` : '—'}</td>
         <td class="r num small">${tr?.priceUsd ? fmt.price(tr.priceUsd) : '—'}</td>
@@ -125,7 +126,7 @@ function positions() {
   if (!data.open.length) return card('Open copied positions', '<div class="empty">No open copies. They appear when a followed wallet buys.</div>', '', { tight: true });
   return card('Open copied positions', data.open.map((p) => {
     const t = data.traders.find((x) => x.wallet === p.meta?.trader);
-    return `<div class="pos"><div class="pos-top"><a class="tk" href="#/trade/workstation?mint=${esc(p.mint)}">${p.symbol ? '$' + esc(p.symbol) : esc(p.mint.slice(0, 6))}</a><span class="tag info">COPY · ${t ? name(t) : esc(short(p.meta?.trader ?? ''))}</span>
+    return `<div class="pos"><div class="pos-top"><a class="tk" href="#/check/coin?mint=${esc(p.mint)}">${p.symbol ? '$' + esc(p.symbol) : esc(p.mint.slice(0, 6))}</a><span class="tag info">COPY · ${t ? name(t) : esc(short(p.meta?.trader ?? ''))}</span>
         <span class="small muted">opened ${fmt.ago(p.openedAt)} · ${esc(p.source)}${p.staleSec > 60 ? ` · <span class="warn">price ${fmt.age(p.staleSec)} old</span>` : ''}</span>
         <span style="margin-left:auto" class="num ${cls(p.pnlUsd)}"><b>${fmt.signed(p.pnlUsd)}</b> ${fmt.pct(p.pnlPct, 1)}</span></div>
       <div class="pos-grid">
@@ -154,7 +155,7 @@ function performance() {
         <td class="r num down">${s.maxDrawdownUsd ? fmt.signed(-s.maxDrawdownUsd) : '—'}</td><td class="r num">${fmt.usd((s.feesUsd ?? 0) + (s.slippageUsd ?? 0), 2)}</td><td class="r num ${cls(s.netUsd)}">${s.trades ? fmt.signed(s.netUsd) : '—'}</td></tr>`; }).join('')}
     </tbody></table></div>` : '<div class="empty">Follow a wallet to see its results.</div>', 'copy book only', { tight: true })}
     <div style="margin-top:var(--gap)">${card('Closed copied positions', data.closed.length ? `<div class="scroll-x"><table class="t"><thead><tr><th>Coin</th><th>Trader</th><th class="r">Invested</th><th class="r">Returned</th><th class="r">P&L</th><th class="r">Held</th><th class="r">Fills</th><th>Exit</th></tr></thead><tbody>
-      ${data.closed.map((p) => `<tr><td class="b"><a href="#/trade/workstation?mint=${esc(p.mint)}">${p.symbol ? '$' + esc(p.symbol) : esc(p.mint.slice(0, 6))}</a></td><td class="small">${traderName(p.meta?.trader)}</td><td class="r num">${fmt.usd(p.budgetUsd, 2)}</td><td class="r num">${fmt.usd(p.proceedsUsd, 2)}</td>
+      ${data.closed.map((p) => `<tr><td class="b"><a href="#/check/coin?mint=${esc(p.mint)}">${p.symbol ? '$' + esc(p.symbol) : esc(p.mint.slice(0, 6))}</a></td><td class="small">${traderName(p.meta?.trader)}</td><td class="r num">${fmt.usd(p.budgetUsd, 2)}</td><td class="r num">${fmt.usd(p.proceedsUsd, 2)}</td>
         <td class="r num ${cls(p.pnlUsd)}">${fmt.signed(p.pnlUsd)} <span class="tiny">${fmt.pct(p.pnlPct, 1)}</span></td><td class="r num">${fmt.age(p.holdSec)}</td><td class="r num">${p.fills.length}</td><td class="wrap small">${esc(p.exitReason ?? '')}</td></tr>`).join('')}
     </tbody></table></div>` : '<div class="empty">No closed copies yet.</div>', `${data.closed.length} shown`, { tight: true })}</div>
     <p class="disclaimer">Simulated fills at the price available when the bot processed each trade, with fees and slippage. A copy usually gets a worse price than the trader. Paper results don't predict future returns, and paper gains can't be cashed out in a thin pool.</p>`;
@@ -181,6 +182,8 @@ function settings() {
 function wire() {
   root.addEventListener('change', (e) => { if (e.target.id === 'cf') { filter = e.target.value; e.target.blur(); render(); } });
   root.addEventListener('click', async (e) => {
+    const cv = e.target.closest('[data-cv]');
+    if (cv) { sub = cv.dataset.cv; history.replaceState(null, '', `#/paper/copy?v=${sub}`); render(); return; }
     const t = e.target;
     const run = async (fn, ok) => { try { await fn(); if (ok) toast(ok, 'good'); document.activeElement?.blur(); data = await api('/api/copy'); render(); } catch (err) { toast(err.message, 'bad'); } };
     if (t.closest('[data-follow]')) {

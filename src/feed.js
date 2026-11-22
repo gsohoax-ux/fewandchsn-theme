@@ -11,6 +11,7 @@ export class PumpPortalFeed extends EventEmitter {
     this.watched = new Set();
     this.pendingSub = new Set();
     this.pendingUnsub = new Set();
+    this.pinned = new Set();        // coins the market-data hub needs: never unsubscribed by the engine's cleanup
     this.accounts = new Set();      // wallets followed for copy trading (subscribeAccountTrade)
     this.pendingAccSub = new Set();
     this.pendingAccUnsub = new Set();
@@ -67,9 +68,11 @@ export class PumpPortalFeed extends EventEmitter {
       for (const a of this.accounts) this.pendingAccSub.add(a);
     };
     ws.onmessage = (ev) => {
-      this.lastMsgAt = Date.now();
+      const rx = Date.now();
+      this.lastMsgAt = rx;
       let msg;
       try { msg = JSON.parse(ev.data); } catch { return; }
+      if (msg && typeof msg === 'object') msg._rx = rx; // when the bot received it (for freshness and latency)
       if (!msg.mint || !msg.txType) {
         // Subscription confirmations are normal; anything that looks like an error is logged (rate limits, bans...)
         const text = JSON.stringify(msg).slice(0, 300);
@@ -88,7 +91,9 @@ export class PumpPortalFeed extends EventEmitter {
   }
 
   watch(mint) { this.watched.add(mint); this.pendingUnsub.delete(mint); this.pendingSub.add(mint); }
-  unwatch(mint) { this.watched.delete(mint); this.pendingSub.delete(mint); this.pendingUnsub.add(mint); }
+  unwatch(mint) { if (this.pinned.has(mint)) return; this.watched.delete(mint); this.pendingSub.delete(mint); this.pendingUnsub.add(mint); }
+  pin(mint) { this.pinned.add(mint); }
+  unpin(mint) { this.pinned.delete(mint); }
   /** Follow every trade a wallet makes (copy trading). */
   watchAccount(w) { this.accounts.add(w); this.pendingAccUnsub.delete(w); this.pendingAccSub.add(w); }
   unwatchAccount(w) { this.accounts.delete(w); this.pendingAccSub.delete(w); this.pendingAccUnsub.add(w); }
@@ -141,11 +146,17 @@ export const DEMO_TRADERS = ['DemoSmartTrader1111111111111111111111111111', 'Dem
 
 export class DemoFeed extends EventEmitter {
   constructor(chain, log = console, xSource = null) {
-    super(); this.chain = chain; this.log = log; this.xSource = xSource; this.watched = new Set(); this.accounts = new Set(); this.connected = true;
+    super(); this.chain = chain; this.log = log; this.xSource = xSource; this.watched = new Set(); this.accounts = new Set(); this.pinned = new Set(); this.connected = true;
     this.demoTraders = DEMO_TRADERS;
+    this.lastMsgAt = Date.now();
+    this.reconnects = 0;
+    setInterval(() => { this.lastMsgAt = Date.now(); }, 1000).unref?.(); // the simulator is always "connected"
   }
+  emit(type, msg) { if (msg && typeof msg === 'object' && type !== 'status') { msg._rx = Date.now(); this.lastMsgAt = msg._rx; } return super.emit(type, msg); }
   watch(m) { this.watched.add(m); }
-  unwatch(m) { this.watched.delete(m); }
+  unwatch(m) { if (this.pinned.has(m)) return; this.watched.delete(m); }
+  pin(m) { this.pinned.add(m); }
+  unpin(m) { this.pinned.delete(m); }
   watchAccount(w) { this.accounts.add(w); }
   unwatchAccount(w) { this.accounts.delete(w); }
 
@@ -155,7 +166,7 @@ export class DemoFeed extends EventEmitter {
     const devs = [rid(), rid()];
     const launch = () => {
       const r = Math.random();
-      const scenario = r < 0.22 ? 'runner' : r < 0.42 ? 'bundled' : r < 0.52 ? 'wash' : r < 0.6 ? 'serial' : 'dead';
+      const scenario = r < 0.12 ? 'pullback' : r < 0.3 ? 'runner' : r < 0.47 ? 'bundled' : r < 0.55 ? 'wash' : r < 0.62 ? 'serial' : 'dead';
       this.#runCoin(scenario, scenario === 'serial' ? pick(devs) : rid());
       setTimeout(launch, rnd(2500, 5000));
     };
@@ -227,6 +238,43 @@ export class DemoFeed extends EventEmitter {
       organic.push(w); return w;
     };
     const washers = [rid(), rid(), rid()];
+    if (scenario === 'pullback') {
+      // Setuh "New Pairs" shape: launch → ~3x run → ~55% pullback → a floor that holds → buyers come back
+      const mc = () => (vSol / vTokens) * 1e9;
+      const startMc = mc();
+      let phase = 'run', peak = 0, floorUntil = 0, buyersLeft = 12, afterSteps = 0;
+      const holders = [];
+      const step2 = () => {
+        if (finished) return;
+        let res, wait = rnd(250, 600);
+        if (phase === 'run') {
+          const w = newWallet(); holders.push(w);
+          res = trade(w, 'buy', rnd(0.9, 1.4));
+          if (mc() >= startMc * 3.1) { phase = 'pull'; peak = mc(); }
+        } else if (phase === 'pull') {
+          const w = holders.shift() ?? pick(organic);
+          res = trade(w, 'sell', (bal.get(w) ?? 0) * rnd(0.6, 1));
+          wait = rnd(400, 900);
+          if (mc() <= peak * 0.46) { phase = 'floor'; floorUntil = Date.now() + 95_000; }
+        } else if (phase === 'floor') {
+          const w = pick(organic);
+          res = Math.random() < 0.5 ? trade(newWallet(), 'buy', rnd(0.03, 0.08)) : trade(w, 'sell', Math.min(bal.get(w) ?? 0, (vTokens * 0.0006)));
+          wait = rnd(1800, 3000);
+          if (Date.now() > floorUntil) phase = 'return';
+        } else if (phase === 'return') {
+          res = trade(newWallet(), 'buy', rnd(0.15, 0.35));
+          wait = rnd(2500, 4000);
+          if (--buyersLeft <= 0) phase = 'after';
+        } else {
+          res = Math.random() < 0.6 ? trade(newWallet(), 'buy', rnd(0.1, 0.6)) : trade(pick(organic), 'sell', (bal.get(pick(organic)) ?? 0) * 0.5);
+          wait = rnd(800, 2000);
+          if (++afterSteps > 140) return;
+        }
+        if (res !== 'done') setTimeout(step2, wait);
+      };
+      setTimeout(step2, 300);
+      return;
+    }
     // a demo "smart" trader joins some coins and trades the full cycle
     const pro = scenario !== 'dead' && Math.random() < 0.55 ? pick(DEMO_TRADERS) : null;
     const plan = pro ? { 6: ['buy', rnd(1, 3)], 18: ['buy', rnd(0.5, 1.5)], 40: ['sellPct', 0.25], 65: ['sellPct', 0.5], 95: ['sellPct', 1],

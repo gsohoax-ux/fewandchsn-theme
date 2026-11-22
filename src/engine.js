@@ -52,8 +52,9 @@ export class Engine {
       setInterval(() => { try { this.learner.maybeTrain(); } catch (e) { this.log.warn(`learning: ${e.message}`); } }, 5 * 60_000).unref();
     }
     setInterval(() => this.store.pruneOld(), 6 * 3600_000).unref();
-    if (!this.cfg.demo) { this.#updateSolPrice(); setInterval(() => this.#updateSolPrice(), 5 * 60_000).unref(); }
-    else this.solUsd = 150;
+    // SOL/USD every 30 s: every USD market cap moves with it, so a 5-minute-old SOL price skews everything
+    if (!this.cfg.demo) { this.#updateSolPrice(); setInterval(() => this.#updateSolPrice(), 30_000).unref(); }
+    else { this.solUsd = 150; this.solUsdAt = Date.now(); setInterval(() => { this.solUsdAt = Date.now(); }, 30_000).unref(); }
   }
 
   /** SOL/USD from the first source that answers (cloud servers are often blocked by one or another). */
@@ -67,7 +68,7 @@ export class Engine {
       try {
         const r = await fetch(url, { signal: AbortSignal.timeout(8000) });
         const price = Number(pick(await r.json()));
-        if (price > 0) { this.solUsd = price; return; }
+        if (price > 0) { this.solUsd = price; this.solUsdAt = Date.now(); this.solUsdSource = new URL(url).hostname; return; }
       } catch { /* try the next source */ }
     }
     if (!this.solUsd) this.log.warn('SOL price unavailable - market caps shown in SOL');
@@ -78,6 +79,7 @@ export class Engine {
     if (this.coins.size >= this.cfg.maxTrackedCoins) this.#evictOne();
     const coin = new Coin(msg);
     this.coins.set(coin.mint, coin);
+    this.metrics?.count('launches');
     this.counters.launches++;
     this.#bump(this.regimeLog.launches);
     this.feed.watch(coin.mint);
@@ -291,6 +293,7 @@ export class Engine {
   onTrade(msg) {
     const coin = this.coins.get(msg.mint);
     if (!coin) return;
+    if (msg._rx) this.metrics?.time('feedToEngine', Date.now() - msg._rx, 'Feed message → engine');
     const wasDevSold = coin.devSold;
     coin.applyTrade(msg);
     for (const s of coin.samples.values()) if (!s.done) { s.peak = Math.max(s.peak, coin.mcSol); s.low = Math.min(s.low ?? s.mc, coin.mcSol); }
@@ -508,6 +511,7 @@ export class Engine {
     coin.result = { at: now, stage, score, light, safety, momentum, narrative, confidence, x, trend, learned, outcomes, liquidity, dexPaid: paid, insiderWallets,
       insiderHeldAtEval, events: coin.result?.events ?? [] };
     this.counters.evaluated++;
+    this.metrics?.time("safetyScoring", Date.now() - now, "Safety + scoring (per coin)");
     if (!coin.counted) {
       coin.counted = true;
       this.pipeline.scored++;
@@ -639,7 +643,7 @@ export class Engine {
       demo: this.cfg.demo, feedConnected: this.feedConnected, paused: this.paused,
       feedProblem: this.feedProblem ?? '', feedLastDataSec: this.feed.lastMsgAt ? Math.round((Date.now() - this.feed.lastMsgAt) / 1000) : null,
       feedReconnects: this.feed.reconnects ?? 0,
-      tracked: this.coins.size, ...this.counters, solUsd: this.solUsd,
+      tracked: this.coins.size, ...this.counters, solUsd: this.solUsd, solUsdAgeSec: this.solUsdAt ? Math.round((Date.now() - this.solUsdAt) / 1000) : null,
       helius: Boolean(this.chain?.enabled), ai: this.ai?.enabled ? this.cfg.aiModel : (this.ai?.disabledReason || 'off'),
       notify: this.notifier.channels,
       x: this.xwatch?.enabled ? { on: true, posts: this.xwatch.posts.size, error: this.xwatch.lastError }

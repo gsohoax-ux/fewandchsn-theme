@@ -50,9 +50,10 @@ export function normalizeTraderSettings(input = {}, base = TRADER_DEFAULTS) {
 }
 
 export class CopyEngine {
-  constructor({ cfg, store, engine = null, feed = null, chain = null, fetchFn = fetch, log = console, now = () => Date.now() }) {
-    Object.assign(this, { cfg, store, engine, feed, chain, fetchFn, log, now });
+  constructor({ cfg, store, engine = null, feed = null, chain = null, market = null, fetchFn = fetch, log = console, now = () => Date.now() }) {
+    Object.assign(this, { cfg, store, engine, feed, chain, market, fetchFn, log, now });
     this.book = new PaperBook({ store, cfg, book: 'copy', getSolUsd: () => this.solUsd, log, now, onEvent: (e) => this.#onFill(e) });
+    this.sync = market ? market.bindBook(this.book, 'copy') : null;
     this.traders = new Map(store.copyTraders().map((t) => [t.wallet, { ...t, settings: { ...TRADER_DEFAULTS, ...t.settings } }]));
     this.settings = { ...PORTFOLIO_DEFAULTS, ...(store.getKv('copySettings') ?? {}) };
     this.pending = new Map(); // `${wallet}:${sig}` -> verification job
@@ -127,7 +128,7 @@ export class CopyEngine {
   // ---------------------------------------------------------------- detection
   onFeedTrade(msg) {
     // live price for copied positions on the bonding curve
-    if (msg.marketCapSol != null && this.solUsd > 0 && [...this.book.open.values()].some((p) => p.mint === msg.mint && p.onCurve)) {
+    if (!this.market && msg.marketCapSol != null && this.solUsd > 0 && [...this.book.open.values()].some((p) => p.mint === msg.mint && p.onCurve)) {
       const mcUsd = Number(msg.marketCapSol) * this.solUsd;
       this.book.updatePrice(msg.mint, { priceUsd: mcUsd / 1e9, mcUsd, vSol: msg.vSolInBondingCurve != null ? Number(msg.vSolInBondingCurve) : null, source: 'live feed' });
     }
@@ -241,6 +242,15 @@ export class CopyEngine {
   async #priceNow(mint, cls) {
     const solUsd = this.solUsd;
     const c = this.engine?.coins.get(mint);
+    if (this.market) {
+      this.market.track(mint, 'copy');
+      const r = await this.market.quote(mint, { maxAgeMs: 10_000, needLiquidity: true });
+      if (r.ok) {
+        const q = r.quote;
+        return { mint, symbol: q.symbol || c?.symbol || '', name: c?.name ?? '', priceUsd: q.priceUsd, mcUsd: q.mcUsd, supply: 1e9, onCurve: q.onCurve,
+          vSol: q.vSol ?? (q.onCurve && solUsd > 0 ? curveVSolFromMc(q.mcUsd / solUsd) : null), liqUsd: q.liqUsd, source: `${q.source}, ${(q.ageMs / 1000).toFixed(1)}s old` };
+      }
+    }
     if (c && !c.migrated && solUsd > 0 && c.mcSol > 0 && c.trades.length && this.now() - c.trades.at(-1).ts < 120_000) {
       return { mint, symbol: c.symbol, name: c.name, priceUsd: (c.mcSol * solUsd) / 1e9, mcUsd: c.mcSol * solUsd, supply: 1e9, onCurve: true, vSol: c.vSol, liqUsd: null,
         source: 'live bonding-curve price (bot feed)' };
@@ -344,6 +354,7 @@ export class CopyEngine {
 
   /** Prices for copied positions the live feed doesn't cover, then time-based rules. */
   async pollPrices() {
+    if (this.sync) return this.sync();
     const mints = [...this.book.open.values()].filter((p) => !(p.source === 'live feed' && this.now() - p.lastAt < 30_000)).map((p) => p.mint);
     if (mints.length) {
       const snaps = await dexSnapshots(mints, { fetchFn: this.fetchFn });

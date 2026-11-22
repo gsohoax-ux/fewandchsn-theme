@@ -187,12 +187,74 @@ address or link into the search bar at the top to jump straight to Coin Check.
 
 | Section | What's in it |
 |---|---|
-| **Dashboard** | **Overview**: headline numbers, live discovery board (New Pairs / In between / Final Stretch), runner detection, 5-minute movers, live ranking, automatic paper trading, alerts, Why they died. **Trends**: confirmed narratives with sources, velocity, AI thesis and coin ideas, viral X posts, Pump.fun themes. **Learning Center**: past outcomes by stage, score, narrative and safety, learned signals, market condition, strategy observations. **System Health**: every service and outside API, background jobs, database, Desk, Logger and audit log. |
-| **Strategy** | The Setuh scalping setups with their own paper trading (see below). |
-| **Coin Check & Paper Trade** | Research one coin, watch its live chart, and manage your own simulated positions. |
-| **Copy Trading** | Follow wallets and mirror all their buys, adds, partial sells and exits with simulated money. |
+| **Dashboard** | **Overview**: headline numbers, live discovery board (New Pairs / In between / Final Stretch), runner detection, 5-minute movers, live ranking, alerts, Why they died. **Trends**: confirmed narratives with sources, velocity, AI thesis and coin ideas, viral X posts, Pump.fun themes. **Learning Center**: past outcomes, learned signals, market condition. **System & latency**: live-data freshness and measured latency at every stage, every service and outside API, background jobs, database, Desk, Logger and audit log. |
+| **Setuh Strategy** | The five setups, their entry and exit rules, every rule's thresholds, and what is forming right now. |
+| **Coin Check** | Paste a coin: full safety report, live chart, Setuh strategy compatibility, report confidence, whether it qualifies for paper trading, "Send to Setuh trader", and a manual paper-trade ticket. |
+| **Paper Trading** | **Setuh Scalping Trader** (autonomous), its **journal & analytics**, **Automatic** (follows alerts), **Manual**, and **Copy trading**. Each has its own money, positions and results. |
 
-### 📐 Strategy (Setuh setups, separate paper trading)
+### ⚡ Live market data (how prices stay current)
+
+Stale prices had one main cause: once a coin graduated, the bot stopped streaming its trades and fell back to
+DexScreener / GeckoTerminal snapshots (10–120 s old plus the providers' own lag), and SOL/USD was refreshed only
+every 5 minutes. Now:
+
+- A **market-data hub** keeps every coin that matters (open positions in any book, Setuh candidates, coins you sent
+  in, the coin open in Coin Check, copied tokens) **pinned on the PumpPortal stream** — including **PumpSwap trades
+  after graduation** — and prices each trade the moment it arrives. Every price carries the time it was observed.
+- **SOL/USD refreshes every 30 s.** Paper books get prices pushed instantly instead of each polling on its own.
+- Before any simulated buy, the trader asks for a quote **no older than the max data age** (default 10 s). If the stream
+  can't vouch for it, it refreshes; if it still can't, the entry is **blocked** and the reason recorded. New entries are
+  also blocked while the feed is stale or disconnected.
+- **System & latency** shows feed status (healthy / delayed / stale / disconnected), last message age, price updates
+  per minute, and measured p50 / p95 for discovery latency and market-data latency (sampled against on-chain block
+  times with Helius, ±1 s), feed → engine, event-loop lag, safety checks, setup recognition, signal → entry, and
+  simulated execution.
+
+A paper trader can't have zero latency. Every simulated fill uses the newest price the bot had at that moment, and
+signal price, decision price, fill price and current price are recorded separately.
+
+### 🤖 Autonomous Setuh Scalping Paper Trader (Paper Trading › Setuh Scalping Trader)
+
+Finds and trades the five Setuh setups by itself with simulated money:
+
+1. **Discover:** scans every live coin every 2 s (cheap checks first, so unsuitable coins are rejected early), plus
+   graduated coins for the Migrated setup, plus any coin you send in.
+2. **Recognize the setup** and report its stage: *waiting for setup → waiting for confirmation → entry conditions met*,
+   or *rejected / insufficient data / setup invalidated*.
+3. **Deeper safety check:** as soon as a setup starts forming, the full Coin Check runs on it in the background.
+4. **Critical safety gates** (never overridden by confidence): Coin Check verdict not AVOID, mint and freeze authority
+   revoked, no honeypot / transfer-tax red flags, verified on-chain safety (configurable), the bot's live read not AVOID,
+   slippage within your limit.
+5. **Confidence score** 0–100 with every part shown: rules met, safety, data quality, liquidity/slippage, reward vs risk,
+   narrative & momentum, and the setup's own track record once it has 20+ trades. Missing data scores 0, never neutral.
+6. **Execute:** fresh age-checked quote → rules re-checked at that price → drift since the signal and reward/risk checked →
+   fill simulated with fees, price impact and sandwich costs. Otherwise **Entry missed**, **Setup invalidated** or
+   **Insufficient data**, with the reason.
+7. **Manage:** stop at the setup's invalidation level, sell part at the target (default 50%) then a trailing stop on the
+   rest, the setup's time stop and a global max hold, the New Pairs early take, and **emergency exits** (dev or bundle
+   wallets dumping after entry, the live safety read turning AVOID, pool liquidity collapsing).
+
+**Multiple entries per coin:** each entry must re-qualify on its own (the setup has to reset and confirm again), with a
+minimum gap, a max entries per coin and a max exposure per coin. Every entry is its own position — *Entry 1, Entry 2,
+Entry 3* — and the combined position per coin is shown too. A repeated data event can't create a duplicate.
+
+**Your controls:** fully autonomous or *ask me first* (approval mode: entries wait for you and are re-checked with fresh
+data when you approve; cancel any pending entry), pause discovery, pause new entries (open positions keep being
+managed), send a coin in, sell 50% / close any entry, close a whole coin.
+
+**Risk controls:** starting simulated balance, position size, max simultaneous positions (and per setup), max daily
+simulated loss, max exposure per coin, max entries per coin, minimum confidence, max slippage, max data age, max holding
+time, max drift between signal and fill, minimum reward : risk, partial-take %, trailing % after the target.
+
+**Activity feed** shows every step with a timestamp (setup forming, waiting for confirmation, safety passed, confidence,
+Entry N executed, partial sell, stop-loss, closed, rejected, missed…); tap an event to open the coin or the trade.
+**Journal & analytics:** one row per entry (coin and address, setup, entry number, confidence, safety result, signal and
+fill prices, size, exit time and price, fees and slippage, P&L, reasons in and out), combined positions per coin, and
+per-setup analytics (trades, win rate, average P&L, profit factor, max drawdown, average hold, return, missed and rejected
+opportunities) plus results by confidence range. **Review notes** point out what the numbers suggest once there are
+enough trades — the trader **never changes its own rules**.
+
+### 📐 Setuh Strategy (setups, rules, monitoring)
 
 Five setups, each with every rule shown as met (✓), failed (✕) or not yet confirmed (?), plus the entry, the
 invalidation level and why, the target, and reward vs risk:
@@ -208,7 +270,7 @@ invalidation level and why, the target, and reward vs risk:
 - **Migrated Coins:** graduates 1–3 h old, 60–70% off a $100K+ high, a sideways floor around $20–50K that holds, and a
   breakout on volume. A drop alone is never an entry.
 
-This is **System B**: its own daily budget (`STRATEGY_DAILY_USD`, default $50, `STRATEGY_PER_TRADE_USD` $10), positions,
+Traded by the Autonomous Setuh Scalping Paper Trader (above), which has its own simulated balance, positions,
 history and statistics. It never touches the automatic paper trader (System A, the $30/day budget that follows
 alerts) or your manual positions. **Performance** shows, per setup: detected, valid, rejected, entries, completed,
 win rate, average win and loss, profit factor, max drawdown, average hold, fees and slippage, and results by market
@@ -521,6 +583,9 @@ src/strategy/     Setuh setups (setups.js, pure rules) and their own paper engin
 src/copy/         copy trading: classify.js (what a wallet's transaction really was) and engine.js (mirroring)
 src/paper.js      automatic paper trading that follows alerts (System A)
 src/health.js     API health, background jobs, database health
+src/market.js     market-data hub: live prices with ages, stream pinning, fresh quotes
+src/metrics.js    latency timings (p50/p95), rates, event-loop lag
+src/strategy/gates.js  Setuh safety gates and confidence score
 src/analytics.js  dashboard headline numbers
 src/store.js      SQLite history (launches, alerts, learning samples, simulated positions, signals, audit log)
 docs/ARCHITECTURE.md  feature inventory, service map and the two paper-trading systems

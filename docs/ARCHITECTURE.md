@@ -33,6 +33,8 @@ PumpPortal WS ─ feed.js ─► engine.js (discovery, scoring, alerts) ──�
 candles.js   GeckoTerminal OHLCV + candles built from recorded live trades (charts, migrated setups)
 deepcheck.js full single-coin safety check (Helius + DexScreener + RugCheck)
 health.js    per-provider API health, background-job status, database health
+market.js    market-data hub: stream-pinned coins, price per trade with its age, age-checked quotes
+metrics.js   measured latency (p50/p95) at every stage, rates, event-loop lag
 store.js     SQLite (launches, alerts, samples, paper_trades, kv, sim_positions, sim_fills,
              strategy_signals, audit_log)
 server.js    HTTP API + static app (public/index.html, public/app/*.js)
@@ -108,19 +110,40 @@ indexed), and acts once per wallet + signature + token (`copy_events` primary ke
 Buys use a fixed $ amount with position, trader and portfolio caps, delay, liquidity and slippage limits; sells
 mirror the trader's % on the copy. Without Helius it runs on the feed alone and says so.
 
-## 5. Independent paper-trading systems
+## 5. Live market data
+
+Diagnosis of stale prices (e.g. $124K shown while the coin traded at $110K): such market caps only exist after
+graduation, and after graduation the bot used to (a) unsubscribe the coin from the PumpPortal stream when the engine
+dropped it, (b) price positions from DexScreener every 10 s / GeckoTerminal OHLCV cached 15–120 s (plus the providers'
+own lag), and (c) convert to USD with a SOL price refreshed every 5 minutes.
+
+Fix: `market.js` pins every coin that matters on the stream (`feed.pin` survives the engine's cleanup), prices every
+Pump.fun and PumpSwap trade on arrival (`_rx` receive timestamp), pushes prices into the paper books, and serves
+`quote(mint, {maxAgeMs})`: on a healthy stream a price is current up to the last feed message; otherwise it is refreshed,
+or refused with the reason. SOL/USD refreshes every 30 s. The Setuh trader blocks entries on stale data or a stale feed.
+
+## 6. Autonomous Setuh trader (System B)
+
+`strategy/engine.js` scans live coins every 2 s (cheap rejections first), tracks each setup through decision stages
+(`setups.js decisionStage`), runs the full Coin Check on forming candidates (2 in parallel, cached 5 min), applies the
+critical gates and confidence score (`strategy/gates.js`), and executes with an age-checked quote, re-checked rules,
+drift and reward/risk limits. Entries are separate positions with an entry number; re-entry needs the setup to reset
+(re-arm) plus a minimum gap, per-coin entry and exposure caps. Approval mode queues signals for the user. Exits: stop at
+invalidation, partial take-profit then trailing, time stops, emergency exits. Activity feed: `setuh_activity` table.
+
+## 7. Independent paper-trading systems
 
 | | System A (automatic, existing) | System B (Setuh strategy) | Manual | System D (copy) |
 |---|---|---|---|---|
 | Module | `paper.js` | `strategy/engine.js` + `paperbook.js` book `strategy` | `manual.js` + `paperbook.js` book `manual` | `copy/engine.js` + book `copy` |
-| Entries | Every alert | Setup signals | You | Followed wallets' buys/adds |
-| Budget | `PAPER_DAILY_USD` (30) | `STRATEGY_DAILY_USD` (50) | Per position | $ per buy + exposure caps |
+| Entries | Every alert | Confirmed setup + gates + confidence (autonomous or approval) | You | Followed wallets' buys/adds |
+| Budget | `PAPER_DAILY_USD` (30) | Simulated balance (default $1,000) + risk limits | Per position | $ per buy + exposure caps |
 | Exits | −35% stop, trailing, 92% curve, graduation, stall, max hold, runner, moonbag | Per-setup stop/target/time stop | Your stop / target / trail / sells | Mirrored sells + optional own rules |
 | Storage | `paper_trades`, kv `paper` | `sim_positions`/`sim_fills` where book = `strategy`, `strategy_signals` | `sim_*` where book = `manual` | `sim_*` book `copy`, `copy_traders`, `copy_events` |
 
 A book only ever loads and manages rows with its own book name.
 
-## 6. Data integrity rules
+## 8. Data integrity rules
 
 - Prices, liquidity and candles come only from PumpPortal trades, DexScreener or GeckoTerminal. When none
   is available the UI shows "unavailable" and marks stale data with its age.
@@ -129,7 +152,7 @@ A book only ever loads and manages rows with its own book name.
 - Every open, sell, rule change and strategy config change is written to `audit_log`.
 - Historical numbers are labelled "past results"; nothing shows a projected multiple as a likely outcome.
 
-## 7. Known limitations
+## 9. Known limitations
 
 - GeckoTerminal's free API allows about 30 requests a minute, so charts cache for 15–60 s and migrated-coin
   scanning is queued. Coins too new for GeckoTerminal fall back to candles built from the trades the bot

@@ -14,6 +14,8 @@ const statePoll = poller(async () => {
 const analyticsPoll = poller(async () => { analyticsData = await api('/api/analytics'); if (!root.hidden && sub === 'overview') render(); }, 10_000);
 const learningPoll = poller(async () => { learningData = await api('/api/learning'); if (!root.hidden && sub === 'learning') render(); }, 30_000);
 const healthPoll = poller(async () => { healthData = await api('/api/health'); if (!root.hidden && sub === 'system') render(); }, 5000);
+let latencyData = null;
+const latencyPoll = poller(async () => { latencyData = await api('/api/latency'); if (!root.hidden && sub === 'system') render(); }, 2000);
 
 export function mount(el) { root = el; statePoll.start(); }
 export function show(s) {
@@ -21,9 +23,10 @@ export function show(s) {
   analyticsPoll[sub === 'overview' ? 'start' : 'stop']();
   learningPoll[sub === 'learning' ? 'start' : 'stop']();
   healthPoll[sub === 'system' ? 'start' : 'stop']();
+  latencyPoll[sub === 'system' ? 'start' : 'stop']();
   render();
 }
-export function hide() { analyticsPoll.stop(); learningPoll.stop(); healthPoll.stop(); }
+export function hide() { analyticsPoll.stop(); learningPoll.stop(); healthPoll.stop(); latencyPoll.stop(); }
 
 function render() {
   const s = store.state;
@@ -56,7 +59,6 @@ function overview(s) {
     <div class="grid" style="align-content:start">
       ${card('Live coin discovery', board(s.board), 'tap a coin for the full read', { tight: true })}
       ${card('Live ranking', ranking(s.coins), `updated ${new Date().toLocaleTimeString()}`, { tight: true })}
-      ${card('Automatic paper trading <span class="faint" style="text-transform:none;letter-spacing:0">· System A</span>', autoPaper(s), 'follows every alert · separate from Strategy and Manual')}
     </div>
     <div class="grid" style="align-content:start">
       ${card('Runner detection', runners(s.runners ?? []), `${(s.runners ?? []).length} now`, { tight: true })}
@@ -132,7 +134,7 @@ function why(R) {
     <div class="bar" style="margin-top:3px"><i style="width:${(n / max) * 100}%;background:var(--down)"></i></div></div>`).join('');
 }
 
-function autoPaper(s) {
+export function autoPaper(s) {
   const P = s.paper;
   if (!P) return '<span class="muted">Automatic paper trading is off (PAPER=0).</span>';
   const usd = (sol) => (P.solUsd ? fmt.usd(sol * P.solUsd, 2) : `${sol.toFixed(3)} SOL`);
@@ -289,7 +291,8 @@ function system(s) {
     ['Executor', lastTxt('EXECUTOR', 'paper mode · waiting'), `${pl.paperTrades} auto paper trades`],
     ['Risk', lastTxt('RISK', 'no open risk'), H.desk.paused ? 'alerts paused' : ''],
   ];
-  return `<div class="section-title"><h2>System health</h2><p>Up ${fmt.age(H.uptimeSec)} · checks refresh every 5 s</p></div>
+  return `<div class="section-title"><h2>System health</h2><p>Up ${fmt.age(H.uptimeSec)} · latency refreshes every 2 s, services every 5 s</p></div>
+    ${latencyPanel()}
     ${card('Services', `<table class="t"><tbody>${svc.map(([n, state, d]) => `<tr><td style="width:30%">${dot(state)} <b>${n}</b></td><td class="wrap small">${d}</td></tr>`).join('')}</tbody></table>`, '', { tight: true })}
     <div class="grid g2" style="margin-top:var(--gap)">
       ${card('Outside APIs (last 15 min)', H.providers.length ? `<div class="scroll-x"><table class="t"><thead><tr><th>Provider</th><th class="r">Calls</th><th class="r">Failed</th><th class="r">Median</th><th>Last OK</th><th>Last error</th></tr></thead><tbody>${H.providers.map((p) => `<tr><td>${dot(p.state)} ${esc(p.label)}</td><td class="r num">${p.calls}</td><td class="r num ${p.recentFails ? 'down' : ''}">${p.recentFails}/${p.recentCalls}</td><td class="r num">${p.medianMs != null ? p.medianMs + ' ms' : '—'}</td><td class="small muted">${p.lastOkAgoSec != null ? fmt.age(p.lastOkAgoSec) + ' ago' : '—'}</td><td class="small wrap ${p.lastError ? 'down' : 'muted'}">${esc(p.lastError || '—')}</td></tr>`).join('')}</tbody></table></div>` : '<div class="empty">No outside calls yet.</div>', '', { tight: true })}
@@ -303,4 +306,45 @@ function system(s) {
       ${card('Logger', `<ul class="log" data-keep="log">${(H.events || []).length ? H.events.map((e) => `<li><span class="faint">${fmt.time(e.at)}</span> <span class="a a-${e.agent}">${e.agent}</span>${e.symbol ? `<a href="#" data-open="${esc(e.mint)}" style="color:var(--text)">$${esc(e.symbol)}</a> ` : ''}<span class="l-${e.level}">${esc(e.text)}</span></li>`).join('') : '<li class="muted">Waiting for the first decisions…</li>'}</ul>`, 'why the bot did what it did', { tight: true })}
       ${card('Audit log', H.audit.length ? `<ul class="log">${H.audit.map((a) => `<li><span class="faint">${fmt.dateTime(a.at)}</span> <b>${esc(a.actor)}</b> ${esc(a.book)} <span class="a-EXECUTOR">${esc(a.action)}</span> <span class="muted">${esc(JSON.stringify(a.detail)).slice(0, 160)}</span></li>`).join('')}</ul>` : '<div class="empty">No simulated trades or setting changes yet.</div>', 'paper trades & settings changes', { tight: true })}
     </div>`;
+}
+
+// ------------------------------------------------------------------ live data & latency
+const ms = (x) => (x == null ? '—' : x >= 10_000 ? `${(x / 1000).toFixed(1)} s` : x >= 1000 ? `${(x / 1000).toFixed(2)} s` : `${Math.round(x)} ms`);
+function freshState(ageMs, connected) {
+  if (!connected) return ['bad', 'DISCONNECTED'];
+  if (ageMs == null) return ['warn', 'NO DATA YET'];
+  if (ageMs <= 2000) return ['ok', 'HEALTHY'];
+  if (ageMs <= 10_000) return ['warn', 'DELAYED'];
+  return ['bad', 'STALE'];
+}
+function latencyPanel() {
+  const L = latencyData;
+  if (!L) return card('Live data & latency', '<div class="muted small">Measuring…</div>');
+  const T = L.timings ?? {}, R = L.rates ?? {};
+  const feedAge = L.market?.feedLastMsgAgeMs ?? (L.feed.lastDataSec != null ? L.feed.lastDataSec * 1000 : null);
+  const [fc, word] = freshState(feedAge, L.feed.connected);
+  const row = (label, key, note = '') => { const t = T[key]; return `<tr><td>${label}</td><td class="r num">${t?.n ? ms(t.p50) : '—'}</td><td class="r num">${t?.n ? ms(t.p95) : '—'}</td><td class="r num">${t?.n ? ms(t.last) : '—'}</td><td class="r num muted">${t?.n ?? 0}</td><td class="small muted wrap">${note}</td></tr>`; };
+  const solAge = L.solUsdAgeSec;
+  return card('Live data & latency', `
+    <div class="kpis" style="margin-bottom:12px">
+      <div class="kpi"><small>Feed status</small><b><span class="dot ${fc}"></span> ${word}</b><span>${L.feed.demo ? 'demo simulator' : 'PumpPortal websocket'} · ${L.feed.reconnects} reconnects</span></div>
+      <div class="kpi"><small>Last feed message</small><b>${feedAge != null ? ms(feedAge) : '—'}</b><span>ago</span></div>
+      <div class="kpi"><small>Price updates</small><b>${Math.round(R.priceUpdates ?? 0)}/min</b><span>${L.market ? `${L.market.counts.curveTrades} curve · ${L.market.counts.ammTrades} PumpSwap trades` : ''}</span></div>
+      <div class="kpi"><small>Coins pinned on stream</small><b>${L.market?.tracked ?? 0}</b><span>positions, candidates, charts</span></div>
+      <div class="kpi"><small>New coins</small><b>${Math.round(R.launches ?? 0)}/min</b><span>discovered</span></div>
+      <div class="kpi"><small>SOL price age</small><b class="${solAge != null && solAge > 90 ? 'warn' : ''}">${solAge != null ? fmt.age(solAge) : '—'}</b><span>$${(L.solUsd ?? 0).toFixed(2)} · refreshed every 30 s</span></div>
+    </div>
+    <div class="scroll-x"><table class="t"><thead><tr><th>Stage</th><th class="r">p50</th><th class="r">p95</th><th class="r">Last</th><th class="r">Samples</th><th>What it measures</th></tr></thead><tbody>
+      ${row('Coin discovery latency', 'discoveryLatency', 'On-chain block time → bot received the new coin (sampled, ±1 s block-time resolution; needs Helius)')}
+      ${row('Market-data latency', 'tradeLatency', 'On-chain block time → bot received a trade (sampled, ±1 s; needs Helius)')}
+      ${row('Feed message → engine', 'feedToEngine', 'From receiving a trade to the engine applying it')}
+      ${row('Event-loop lag', 'eventLoopLag', 'How late the process reacts (high = overloaded)')}
+      ${row('Safety + scoring', 'safetyScoring', 'Per coin, the bot\'s own checks')}
+      ${row('Full safety check', 'deepCheck', 'Coin Check run by the Setuh trader on candidates')}
+      ${row('Setup recognition', 'setupScan', 'One pass over all live coins for the five setups')}
+      ${row('Signal → simulated entry', 'signalToEntry', 'From all rules met to the simulated fill')}
+      ${row('Simulated execution', 'execution', 'Fresh quote, re-check and fill')}
+      ${row('Price refresh (DexScreener)', 'priceRefresh', 'Only when the live stream can\'t vouch for a price')}
+    </tbody></table></div>
+    <p class="tiny muted" style="margin-bottom:0">Healthy ≤ 2 s since the last feed message · delayed ≤ 10 s · stale beyond that. New Setuh entries are blocked while the feed is stale or disconnected, and whenever a price is older than the trader's max data age. A paper trader can't have zero latency: every simulated fill uses the newest price the bot had at that moment.</p>`, new Date().toLocaleTimeString());
 }

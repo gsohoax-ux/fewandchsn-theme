@@ -3,7 +3,7 @@
 import { $, $$, esc, fmt, api, poller, card, cls, toast, uid, spark } from './core.js';
 import { CandleChart } from './chart.js';
 
-export const SUBS = [['workstation', 'Workstation'], ['history', 'Trade history']];
+export const SUBS = [['workstation', 'Coin Check'], ['manual', 'Manual paper trading']];
 const TFS = ['1m', '5m', '15m', '1h', '4h', '1d'];
 const TF_SEC = { '1m': 60, '5m': 300, '15m': 900, '1h': 3600, '4h': 14400, '1d': 86400 };
 const GROUPS = [
@@ -19,7 +19,7 @@ let root, sub = 'workstation';
 const S = { mint: null, check: null, checking: false, checkErr: '', chart: null, chartErr: '', chartAt: 0, tf: '5m', mode: 'price', manual: null, histBook: 'manual', strat: null, editing: new Set(), lastPx: new Map() };
 let chart = null;
 
-const manualPoll = poller(async () => { S.manual = await api('/api/manual'); renderPositions(); renderTotals(); if (sub === 'history') renderHistory(); syncLevels(); }, 2000);
+const manualPoll = poller(async () => { S.manual = await api('/api/manual'); renderPositions(); renderTotals(); if (sub === 'manual') renderHistory(); syncLevels(); }, 2000);
 const chartPoll = poller(async () => { await loadChart(); }, 5000);
 
 export function mount(el) {
@@ -49,21 +49,25 @@ export function mount(el) {
           </div>
         </div>
       </div>
-      <div class="card" style="margin-top:var(--gap)" id="poscard"><header><h2>Open paper positions</h2><div class="meta" id="posmeta"></div></header>
-        <div class="kpis" id="ptotals" style="padding:12px 14px 0;margin:0"></div><div id="positions"></div></div>
+      <div class="notice info small" style="margin-top:var(--gap)">Your manual paper positions and history are in <a href="#/paper/manual">Paper Trading › Manual</a>.</div>
     </div>
-    <div id="hist" hidden></div>`;
+    <div id="mv" hidden>
+      <div class="section-title"><h2>Manual paper trading</h2><p>Positions you opened yourself from Coin Check. Separate from the Setuh trader, automatic and copy trading.</p></div>
+      <div class="card" id="poscard"><header><h2>Open manual positions</h2><div class="meta" id="posmeta"></div></header>
+        <div class="kpis" id="ptotals" style="padding:12px 14px 0;margin:0"></div><div id="positions"></div></div>
+      <div id="hist" style="margin-top:var(--gap)"></div>
+    </div>`;
   wire();
 }
 
 export function show(s, params = {}) {
   sub = SUBS.some(([k]) => k === s) ? s : 'workstation';
   $('#ws', root).hidden = sub !== 'workstation';
-  $('#hist', root).hidden = sub !== 'history';
+  $('#mv', root).hidden = sub !== 'manual';
   manualPoll.start();
   if (params.mint && params.mint !== S.mint) openMint(params.mint);
   else if (S.mint && sub === 'workstation') chartPoll.start();
-  if (sub === 'history') renderHistory();
+  if (sub === 'manual') { renderHistory(); renderPositions(); renderTotals(); }
   if (sub !== 'workstation') chartPoll.stop();
 }
 export function hide() { manualPoll.stop(); chartPoll.stop(); }
@@ -80,7 +84,7 @@ export async function openMint(q) {
   try {
     const { mint } = await api(`/api/resolve?q=${encodeURIComponent(q)}`);
     S.mint = mint;
-    history.replaceState(null, '', `#/trade/workstation?mint=${mint}`);
+    history.replaceState(null, '', `#/check/coin?mint=${mint}`);
   } catch (e) { S.checking = false; S.checkErr = e.message; renderSafety(); $('#chead', root).innerHTML = `<span class="down">${esc(e.message)}</span>`; return; }
   chartPoll.stop(); chartPoll.start();
   try { S.check = await api(`/api/check?mint=${S.mint}`); }
@@ -179,7 +183,7 @@ function renderSafety() {
   const rest = r.checks.filter((c) => !used.has(c.group));
   const restGroups = [...new Set(rest.map((c) => c.group))];
   el.innerHTML = card('Coin safety analysis', `
-    <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:10px"><span class="verdict ${r.verdict}">${r.verdict}</span>
+    <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:10px"><span class="verdict ${r.verdict}" title="Overall assessment. Never a guarantee.">${r.verdict === 'SAFE' ? 'SAFE · NOT GUARANTEED' : r.verdict}</span>
       <span><b>Safety ${r.score}/100</b> · <span class="down">${r.bad} red flag${r.bad === 1 ? '' : 's'}</span> · <span class="warn">${r.warn} warning${r.warn === 1 ? '' : 's'}</span>${r.unknown ? ` · <span class="muted">${r.unknown} not checked</span>` : ''}</span>
       ${r.live ? `<span class="small muted">Bot's live read: score ${r.live.score} · momentum ${r.live.momentum} · narrative ${r.live.narrative} · ${esc(r.live.confidence)} confidence${r.live.runner ? ' · runner signs' : ''}</span>` : ''}</div>
     <div class="notice warn" style="margin-bottom:12px"><b>Not a guarantee of safety.</b> These checks lower risk but can't rule out a rug pull: developers and large holders can still sell, and some risks only show on-chain when they happen.${r.verdict === 'UNVERIFIED' ? ' <b>UNVERIFIED:</b> key on-chain checks could not run, so this coin is not confirmed safe.' : ''}</div>
@@ -190,7 +194,7 @@ function renderSafety() {
       ${r.notes?.length ? `<div class="tiny muted" style="text-transform:uppercase;letter-spacing:.6px;margin:12px 0 4px">Couldn't check</div><ul class="checks">${r.notes.map((n) => `<li class="lv-unknown">${esc(n)}</li>`).join('')}</ul>` : ''}
     </details>
     <div class="links" style="margin-top:12px">${r.links?.padre ? `<a target="_blank" rel="noopener" href="${esc(r.links.padre)}">Padre</a>` : ''}<a target="_blank" rel="noopener" href="${esc(r.links?.pump)}">pump.fun</a><a target="_blank" rel="noopener" href="${esc(r.links?.dexscreener)}">DexScreener</a><a target="_blank" rel="noopener" href="${esc(r.links?.solscan)}">Solscan</a><a target="_blank" rel="noopener" href="${esc(r.links?.rugcheck)}">RugCheck</a></div>
-    <p class="tiny faint" style="margin-bottom:0">Checked in ${(r.tookMs / 1000).toFixed(1)} s. Holder concentration excludes the bonding curve and pools.</p>`, `${new Date(r.at).toLocaleTimeString()}`);
+    <p class="tiny faint" style="margin-bottom:0">Checked in ${(r.tookMs / 1000).toFixed(1)} s. Holder concentration excludes the bonding curve and pools.</p>`, `${new Date(r.at).toLocaleTimeString()}`) + compatCard(r);
 }
 
 // ------------------------------------------------------------------ order ticket
@@ -357,7 +361,7 @@ async function renderHistory() {
   }
   const rows = S.histBook === 'manual' ? (S.manual?.closed ?? []) : S.histBook === 'strategy' ? (S.strat?.closed ?? []) : [];
   const t = S.manual?.totals;
-  el.innerHTML = `<div class="section-title"><h2>Trade history</h2><p>Completed simulated positions. Manual and Strategy are tracked separately.</p></div>
+  el.innerHTML = `<div class="section-title"><h2 style="font-size:15px">Trade history</h2><p>Completed simulated positions. Manual and Setuh are tracked separately.</p></div>
     <div class="seg" id="histseg" style="margin-bottom:12px"><button data-hb="manual" class="${S.histBook === 'manual' ? 'on' : ''}">Manual</button><button data-hb="strategy" class="${S.histBook === 'strategy' ? 'on' : ''}">Strategy (Setuh)</button></div>
     ${S.histBook === 'manual' && t ? `<div class="kpis">
       <div class="kpi"><small>Closed trades</small><b>${t.trades}</b></div><div class="kpi"><small>Win rate</small><b>${t.winRate != null ? t.winRate + '%' : '—'}</b></div>
@@ -386,7 +390,7 @@ function wire() {
     const pr = t.closest('[data-b]');
     if (pr) { $('#budget', root).value = pr.dataset.b; for (const b of $$('#presets button', root)) b.classList.toggle('primary', b === pr); renderPretrade(); return; }
     const ld = t.closest('[data-load]');
-    if (ld) { e.preventDefault(); if (sub !== 'workstation') location.hash = `#/trade/workstation?mint=${ld.dataset.load}`; else { openMint(ld.dataset.load); window.scrollTo({ top: 0, behavior: 'smooth' }); } return; }
+    if (ld) { e.preventDefault(); if (sub !== 'workstation') location.hash = `#/check/coin?mint=${ld.dataset.load}`; else { openMint(ld.dataset.load); window.scrollTo({ top: 0, behavior: 'smooth' }); } return; }
     const hb = t.closest('[data-hb]');
     if (hb) { S.histBook = hb.dataset.hb; renderHistory(); return; }
     if (t.closest('#openbtn')) return openPosition();
@@ -396,6 +400,13 @@ function wire() {
     if (sc) { const v = Number(root.querySelector(`[data-custom="${CSS.escape(sc.dataset.sellcustom)}"]`)?.value); if (!(v > 0 && v <= 100)) return toast('Enter a sell % between 1 and 100', 'bad'); return doSell(sc.dataset.sellcustom, v, sc); }
     const ed = t.closest('[data-edit]');
     if (ed) { const id = ed.dataset.edit; S.editing.has(id) ? S.editing.delete(id) : S.editing.add(id); const p = S.manual.open.find((x) => x.id === id); if (p) root.querySelector(`[data-pos="${CSS.escape(id)}"]`).outerHTML = posHtml(p); return; }
+    const ss = t.closest('[data-sendsetuh]');
+    if (ss) {
+      ss.disabled = true;
+      try { const r = await api('/api/setuh/submit', { mint: ss.dataset.sendsetuh }); toast(`Sent to the Setuh trader. ${r.note}`, 'good'); ss.textContent = 'Sent to the Setuh trader'; }
+      catch (err) { toast(err.message, 'bad'); ss.disabled = false; }
+      return;
+    }
     const sv = t.closest('[data-saverisk]');
     if (sv) return saveRisk(sv.dataset.saverisk, sv);
   });
@@ -421,7 +432,7 @@ async function openPosition() {
     const p = await api('/api/manual/open', { mint: S.mint, budgetUsd, risk, requestId: uid() });
     toast(`Paper position started: ${p.symbol ? '$' + p.symbol : 'coin'} · ${fmt.usd(budgetUsd, 2)}`, 'good');
     await manualPoll.now();
-    $('#poscard', root).scrollIntoView({ behavior: 'smooth', block: 'start' });
+    toast('Manage it in Paper Trading › Manual', '');
   } catch (e) { toast(e.message, 'bad'); }
   finally { renderPretrade(); }
 }
@@ -456,4 +467,31 @@ async function saveRisk(id, btn) {
     toast(p.status === 'closed' ? 'Rules saved — a level was already reached, so the position was sold' : 'Stop / target / trail saved', 'good');
     await manualPoll.now();
   } catch (e) { toast(e.message, 'bad'); btn.disabled = false; }
+}
+
+// ------------------------------------------------------------------ Setuh compatibility (Coin Check)
+const STAGE_TAG = { signal: ['up', 'ENTRY CONDITIONS MET'], waiting_confirmation: ['info', 'WAITING FOR CONFIRMATION'], waiting_setup: ['', 'WAITING FOR SETUP'],
+  insufficient_data: ['warn', 'INSUFFICIENT DATA'], rejected: ['down', 'REJECTED'], idle: ['', 'NO SETUP'] };
+function compatCard(r) {
+  const X = r.setuh, RC = r.reportConfidence;
+  if (!X) return '';
+  const Q = X.qualifies;
+  const rows = (X.setups ?? []).map((s) => {
+    const [c, l] = STAGE_TAG[s.stage] ?? ['', s.stage];
+    return `<tr><td class="b small">${esc(s.family)}<div class="tiny muted">${esc(s.name)}</div></td><td><span class="tag ${c}">${l}</span></td>
+      <td class="r num">${s.met != null ? `${s.met}/${s.total}` : '—'}</td><td class="r num">${s.confidence ?? '—'}</td>
+      <td class="small wrap" style="max-width:380px">${esc(s.rejectReason || (s.unconfirmed ?? []).slice(0, 2).join(' · ') || s.note || '')}</td></tr>`;
+  }).join('');
+  return card('Setuh strategy compatibility', `
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px">
+      <span class="tag ${Q?.ok ? 'up' : Q?.failed?.length ? 'down' : 'warn'}" style="height:24px;font-size:12px">${Q?.ok ? 'QUALIFIES FOR PAPER TRADING' : Q?.failed?.length ? 'DOES NOT QUALIFY' : 'NOT ENOUGH DATA'}</span>
+      <span class="small">${esc(Q?.summary ?? '')}</span>
+      ${RC ? `<span class="small muted">Report confidence <b>${RC.score}/100</b> (${esc(RC.detail)})</span>` : ''}</div>
+    ${Q ? `<ul class="checks small">${Q.failed.map((g) => `<li class="lv-bad">${esc(g.text)}</li>`).join('')}${Q.passed.map((g) => `<li class="lv-ok">${esc(g.text)}</li>`).join('')}${Q.unknown.map((g) => `<li class="lv-unknown">${esc(g.text)}</li>`).join('')}</ul>` : ''}
+    ${rows ? `<div class="scroll-x" style="margin-top:10px"><table class="t"><thead><tr><th>Setup</th><th>Right now</th><th class="r">Rules met</th><th class="r">Confidence</th><th>Waiting for / why not</th></tr></thead><tbody>${rows}</tbody></table></div>` : ''}
+    ${X.note ? `<p class="small muted">${esc(X.note)}</p>` : ''}
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">
+      <button class="btn primary" data-sendsetuh="${esc(r.mint)}">${X.inFocus ? 'Already sent to the Setuh trader' : 'Send to Setuh trader'}</button>
+      <span class="small muted" style="align-self:center">The trader watches it and enters only if a setup confirms and every gate passes (same rules as discovered coins).</span></div>
+    <p class="tiny faint" style="margin-bottom:0">Confidence = how complete and favorable the setup and data are, not a chance of profit. Report confidence = how much of the safety check could actually run.</p>`, 'same gates the autonomous trader uses');
 }

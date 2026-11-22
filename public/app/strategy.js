@@ -2,7 +2,7 @@
 // completely separate from the automatic paper trader and from manual positions.
 import { $, $$, esc, fmt, api, poller, card, cls, toast, uid, condList, kpi } from './core.js';
 
-export const SUBS = [['newpairs', 'New Pairs'], ['final', 'Final Stretch'], ['migrated', 'Migrated Coins'], ['performance', 'Performance'], ['settings', 'Rules & settings']];
+export const SUBS = [['newpairs', 'New Pairs'], ['final', 'Final Stretch'], ['migrated', 'Migrated Coins'], ['settings', 'Rules & thresholds']];
 const FAMILY = { newpairs: ['newPairs'], final: ['finalA', 'finalB', 'finalC'], migrated: ['migrated'] };
 const LABELS = {
   enabled: 'Enabled', maxAgeMin: 'Max coin age (min)', minRunMult: 'Launch run needed (x)', pullbackMinPct: 'Pullback from high: min %', pullbackMaxPct: 'Pullback from high: max %',
@@ -26,13 +26,12 @@ export function hide() { poll.stop(); }
 function render() {
   if (!data) { root.innerHTML = '<div class="empty">Loading the strategy engine…</div>'; return; }
   if (root.contains(document.activeElement) && ['INPUT', 'SELECT'].includes(document.activeElement.tagName)) return; // don't wipe a form you're editing
-  const b = data.budget, st = data.settings, sum = data.summary;
-  const head = `<div class="section-title"><h2>Setuh strategy workspace</h2><p>Independent paper trading: its own budget, positions and results — never mixed with the automatic system or your manual trades.</p></div>
+  const st = data.settings, sum = data.summary;
+  const head = `<div class="section-title"><h2>Setuh scalping strategy</h2><p>The five setups, their entry and exit rules, and what is forming right now. Trading happens in Paper Trading › Setuh Scalping Trader.</p></div>
     <div class="kpis">
-      ${kpi('Engine', st.enabled ? 'ON' : 'OFF', st.enabled ? 'scanning and paper-entering' : 'still scanning; no entries', st.enabled ? 'up' : 'down')}
-      ${kpi("Today's budget", `${fmt.usd(b.leftUsd, 0)} left`, `${fmt.usd(b.spentUsd, 0)} of ${fmt.usd(b.dailyUsd, 0)} used · ${fmt.usd(b.perTradeUsd, 0)} per trade`)}
-      ${kpi('Open positions', data.open.length, `max ${st.maxOpen} · ${st.maxOpenPerSetup} per setup`)}
+      ${kpi('Trader', st.entriesPaused ? 'ENTRIES PAUSED' : st.mode === 'approval' ? 'ASKS FIRST' : 'AUTONOMOUS', st.discoveryPaused ? 'discovery paused' : 'scanning every live coin', st.entriesPaused ? 'warn' : 'up')}
       ${kpi('Forming now', data.watching.length, `${data.migratedWatching} graduates being watched`)}
+      ${kpi('Min confidence', st.minConfidence, `max data age ${st.maxDataAgeSec}s`)}
       ${kpi('Closed trades', sum.trades, sum.trades ? `win ${sum.winRate}% · net ${fmt.signed(sum.netUsd)}` : 'no results yet', sum.trades ? cls(sum.netUsd) : '')}
     </div>`;
   let body = '';
@@ -60,12 +59,12 @@ function family(ids) {
   const candHtml = watching.length ? watching.map((w) => signalBlock(w, cfg)).join('') : `<div class="empty">Nothing forming right now. Candidates appear here as soon as the price pattern starts to form, with every rule shown as met (✓), failed (✕) or not yet confirmed (?).</div>`;
   const sigs = data.signals.filter((s) => ids.includes(s.setup) && s.status !== 'watch').slice(0, 30);
   const sigHtml = sigs.length ? `<div class="scroll-x"><table class="t"><thead><tr><th>Time</th><th>Coin</th><th>Setup</th><th>Result</th><th>Why</th></tr></thead><tbody>${sigs.map((s) => `<tr>
-      <td class="small muted">${fmt.time(s.updatedAt ?? s.at)}</td><td class="b"><a href="#/trade/workstation?mint=${esc(s.mint)}">$${esc(s.symbol || s.mint.slice(0, 6))}</a></td><td class="small">${esc(cfg[s.setup]?.name ?? s.setup)}</td>
+      <td class="small muted">${fmt.time(s.updatedAt ?? s.at)}</td><td class="b"><a href="#/check/coin?mint=${esc(s.mint)}">$${esc(s.symbol || s.mint.slice(0, 6))}</a></td><td class="small">${esc(cfg[s.setup]?.name ?? s.setup)}</td>
       <td><span class="tag ${STATUS_TAG[s.status]}">${s.status.toUpperCase()}</span></td><td class="wrap small" style="max-width:520px">${esc(s.status === 'entered' ? s.why : s.reason ?? s.why ?? '')}</td></tr>`).join('')}</tbody></table></div>` : '<div class="empty">No completed signals yet.</div>';
   const open = data.open.filter((p) => ids.includes(p.origin));
   return `<div class="grid ${ids.length > 1 ? 'g3' : ''}" style="${ids.length > 1 ? '' : 'max-width:720px'}">${setupCards}</div>
     <div style="margin-top:var(--gap)">${card('Live candidates', candHtml, `${watching.length} forming`, { tight: true })}</div>
-    <div style="margin-top:var(--gap)">${card('Strategy positions', open.length ? open.map(posBlock).join('') : '<div class="empty">No open positions from these setups.</div>', 'exits run automatically on the server', { tight: true })}</div>
+    <div class="notice info small" style="margin-top:var(--gap)">${open.length} open position${open.length === 1 ? '' : 's'} from these setups. Positions, entries and exits are managed in <a href="#/paper/setuh">Paper Trading › Setuh Scalping Trader</a>; results are in the <a href="#/paper/journal">journal</a>.</div>
     <div style="margin-top:var(--gap)">${card('Signal log', sigHtml, 'valid · entered · skipped · rejected', { tight: true })}</div>`;
 }
 
@@ -88,7 +87,7 @@ function ruleSummary(id, v) {
 
 function signalBlock(w, cfg) {
   const met = w.conditions.filter((c) => c.ok === true).length;
-  return `<div class="pos"><div class="pos-top"><a class="tk" href="#/trade/workstation?mint=${esc(w.mint)}">$${esc(w.symbol || w.mint.slice(0, 6))}</a><span class="tag info">${esc(cfg[w.setup]?.name ?? w.setup)}</span>
+  return `<div class="pos"><div class="pos-top"><a class="tk" href="#/check/coin?mint=${esc(w.mint)}">$${esc(w.symbol || w.mint.slice(0, 6))}</a><span class="tag info">${esc(cfg[w.setup]?.name ?? w.setup)}</span>
       <span class="small muted">forming since ${fmt.time(w.at)} · ${met}/${w.conditions.length} rules met · now ${fmt.usd(w.mcUsd)}</span></div>
     <div class="grid g2"><div>${condList(w.conditions)}</div>
       <div class="small">${w.entry ? `<div class="kv"><div><small>Entry (if confirmed)</small><b>${fmt.usd(w.entry.mcUsd)}</b></div><div><small>Invalidation</small><b class="down">${fmt.usd(w.invalidation.mcUsd)}</b></div>
@@ -99,7 +98,7 @@ function signalBlock(w, cfg) {
 
 function posBlock(p) {
   const m = p.meta ?? {};
-  return `<div class="pos" data-pos="${esc(p.id)}"><div class="pos-top"><a class="tk" href="#/trade/workstation?mint=${esc(p.mint)}">$${esc(p.symbol || p.mint.slice(0, 6))}</a><span class="tag info">${esc(data.config.setups[p.origin]?.name ?? p.origin)}</span>
+  return `<div class="pos" data-pos="${esc(p.id)}"><div class="pos-top"><a class="tk" href="#/check/coin?mint=${esc(p.mint)}">$${esc(p.symbol || p.mint.slice(0, 6))}</a><span class="tag info">${esc(data.config.setups[p.origin]?.name ?? p.origin)}</span>
       <span class="small muted">opened ${fmt.ago(p.openedAt)} · ${esc(p.source)}${p.staleSec > 60 ? ` · <span class="warn">price ${fmt.age(p.staleSec)} old</span>` : ''}</span>
       <span style="margin-left:auto" class="num ${cls(p.pnlUsd)}"><b>${fmt.signed(p.pnlUsd)}</b> ${fmt.pct(p.pnlPct, 1)}</span></div>
     <div class="pos-grid">
@@ -127,7 +126,7 @@ function performance() {
       <tbody>${rows.map((x) => line(x, `${esc(x.family)} · ${esc(x.name)}`)).join('')}${line({ ...P.all }, 'All setups')}</tbody></table></div>`, 'Setuh paper results only', { tight: true })}
     <div class="grid g2" style="margin-top:var(--gap)">
       ${card('By market condition', regimes.length ? `<table class="t"><thead><tr><th>Setup</th><th>Market</th><th class="r">Trades</th><th class="r">Win rate</th><th class="r">Net</th></tr></thead><tbody>${regimes.map(([x, k, v]) => `<tr><td>${esc(x.name)}</td><td>${esc(k)}</td><td class="r num">${v.trades}</td><td class="r num">${v.winRate}%</td><td class="r num ${cls(v.netUsd)}">${fmt.signed(v.netUsd)}</td></tr>`).join('')}</tbody></table>` : '<div class="empty">Results by market condition appear after the first completed trades.</div>', 'cold / normal / hot', { tight: true })}
-      ${card('Completed strategy trades', data.closed.length ? `<div class="scroll-x" style="max-height:420px"><table class="t"><thead><tr><th>Coin</th><th>Setup</th><th class="r">P&L</th><th class="r">Held</th><th>Exit</th></tr></thead><tbody>${data.closed.map((p) => `<tr><td class="b"><a href="#/trade/workstation?mint=${esc(p.mint)}">$${esc(p.symbol || p.mint.slice(0, 6))}</a></td><td class="small">${esc(cfg[p.origin]?.name ?? p.origin)}</td><td class="r num ${cls(p.pnlUsd)}">${fmt.signed(p.pnlUsd)} <span class="tiny">${fmt.pct(p.pnlPct, 1)}</span></td><td class="r num">${fmt.age(p.holdSec)}</td><td class="wrap small">${esc(p.exitReason ?? '')}</td></tr>`).join('')}</tbody></table></div>` : '<div class="empty">No completed trades yet.</div>', `${data.closed.length} shown`, { tight: true })}
+      ${card('Completed strategy trades', data.closed.length ? `<div class="scroll-x" style="max-height:420px"><table class="t"><thead><tr><th>Coin</th><th>Setup</th><th class="r">P&L</th><th class="r">Held</th><th>Exit</th></tr></thead><tbody>${data.closed.map((p) => `<tr><td class="b"><a href="#/check/coin?mint=${esc(p.mint)}">$${esc(p.symbol || p.mint.slice(0, 6))}</a></td><td class="small">${esc(cfg[p.origin]?.name ?? p.origin)}</td><td class="r num ${cls(p.pnlUsd)}">${fmt.signed(p.pnlUsd)} <span class="tiny">${fmt.pct(p.pnlPct, 1)}</span></td><td class="r num">${fmt.age(p.holdSec)}</td><td class="wrap small">${esc(p.exitReason ?? '')}</td></tr>`).join('')}</tbody></table></div>` : '<div class="empty">No completed trades yet.</div>', `${data.closed.length} shown`, { tight: true })}
     </div>
     <p class="disclaimer">Paper results on simulated fills with fees, slippage and network costs. Past paper results do not predict future returns.</p>`;
 }
@@ -139,14 +138,7 @@ function settings() {
   const field = (setup, k, v, d) => typeof d === 'boolean'
     ? `<label class="check small"><input type="checkbox" data-cfg="${setup}" data-k="${k}" ${v ? 'checked' : ''}> ${esc(LABELS[k] ?? k)}</label>`
     : `<div class="field"><label title="default ${d}">${esc(LABELS[k] ?? k)}</label><input class="input mono" data-cfg="${setup}" data-k="${k}" type="number" step="any" min="0" value="${v}"></div>`;
-  return `${card('Strategy engine', `<div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(170px,1fr));align-items:end">
-      <label class="check"><input type="checkbox" data-g="enabled" ${st.enabled ? 'checked' : ''}> Paper-enter valid signals</label>
-      <div class="field"><label>Daily budget ($)</label><input class="input mono" data-g="dailyUsd" type="number" min="1" value="${st.dailyUsd}"></div>
-      <div class="field"><label>Per trade ($)</label><input class="input mono" data-g="perTradeUsd" type="number" min="1" value="${st.perTradeUsd}"></div>
-      <div class="field"><label>Max open positions</label><input class="input mono" data-g="maxOpen" type="number" min="0" value="${st.maxOpen}"></div>
-      <div class="field"><label>Max open per setup</label><input class="input mono" data-g="maxOpenPerSetup" type="number" min="0" value="${st.maxOpenPerSetup}"></div>
-      <button class="btn primary" data-saveg>Save engine settings</button></div>
-      <p class="tiny muted" style="margin-bottom:0">Separate from the automatic paper trader's daily budget. Resets at midnight (same time zone as the automatic system). Changes are saved in the database and logged in the audit log.</p>`)}
+  return `<div class="notice info small">Each setup's thresholds below are its rules. Change one and only that setup changes; every change is saved and logged in the audit log. The trader's balance, position size, confidence and data-age limits are in <a href="#/paper/setuh">Paper Trading › Setuh Scalping Trader › Risk controls</a>. Exits: stop at the setup's invalidation level, sell part at the target (rest on a trailing stop), the setup's time stop, and emergency exits (dev / bundle dumping after entry, safety turning AVOID, pool liquidity collapsing).</div>
     <div class="grid g2" style="margin-top:var(--gap)">
       ${Object.entries(cfg).map(([id, c]) => card(`${esc(c.family)} · ${esc(c.name)}`, `<div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(170px,1fr))">${Object.entries(c.values).map(([k, v]) => field(id, k, v, c.defaults[k])).join('')}</div>
         <div style="display:flex;gap:8px;margin-top:12px"><button class="btn primary sm" data-savecfg="${id}">Save ${esc(c.name)}</button><button class="btn sm" data-resetcfg="${id}">Reset to defaults</button></div>`)).join('')}

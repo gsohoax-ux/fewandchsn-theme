@@ -52,7 +52,7 @@ test('everything except icons needs the login; security headers are set', async 
 test('the app shell and all three section modules are served', async () => {
   const html = await (await get('/')).text();
   assert.match(html, /<script type="module" src="\/app\/main.js">/);
-  for (const f of ['main', 'core', 'dashboard', 'strategy', 'trade', 'chart', 'coin', 'copy']) {
+  for (const f of ['main', 'core', 'dashboard', 'strategy', 'trade', 'chart', 'coin', 'copy', 'setuh', 'auto']) {
     const r = await get(`/app/${f}.js`);
     assert.equal(r.status, 200, f);
     assert.match(r.headers.get('content-type'), /javascript/);
@@ -60,7 +60,7 @@ test('the app shell and all three section modules are served', async () => {
   assert.equal((await get('/app/../src/config.js')).status, 404, 'no path traversal');
   assert.equal((await get('/app/nope.js')).status, 404);
   const main = await (await get('/app/main.js')).text();
-  for (const id of ['dashboard', 'strategy', 'trade', 'copy']) assert.match(main, new RegExp(`id: '${id}'`));
+  for (const id of ['dashboard', 'strategy', 'check', 'paper']) assert.match(main, new RegExp(`id: '${id}'`));
 });
 
 test('dashboard APIs answer', async () => {
@@ -137,4 +137,20 @@ test('copy trading API: follow, validate, controls, separate book', async () => 
   assert.equal(v.open.length, 0);
   assert.equal((await post('/api/copy/settings', { values: { maxTotalExposureUsd: 0 } })).status, 400);
   assert.equal((await (await post('/api/copy/unfollow', { wallet: W })).json()).ok, true);
+});
+
+test('Setuh trader API: view, journal, latency, controls and validation', async () => {
+  const v = await (await get('/api/setuh')).json();
+  assert.ok(v.balance && v.settings && Array.isArray(v.activity));
+  assert.equal(v.settings.mode, 'autonomous');
+  assert.ok((await get('/api/setuh/journal')).ok);
+  assert.ok((await get('/api/latency')).ok);
+  assert.equal((await post('/api/setuh/submit', { mint: 'nope' })).status, 400);
+  const s = await (await post('/api/setuh/submit', { mint: MINT })).json();
+  assert.match(s.note, /Migrated setup only|curve setups/);
+  assert.equal((await post('/api/setuh/approve', { id: 'ghost' })).status, 400);
+  const c = await (await post('/api/strategy/config', { values: { mode: 'approval', minConfidence: 70 } })).json();
+  assert.equal(c.settings.mode, 'approval');
+  assert.equal((await post('/api/strategy/config', { values: { maxDataAgeSec: 0 } })).status, 400);
+  assert.equal((await post('/api/setuh/close-coin', { mint: MINT })).status, 400);
 });

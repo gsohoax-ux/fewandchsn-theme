@@ -50,6 +50,10 @@ export class Store {
         id TEXT PRIMARY KEY, wallet TEXT, signature TEXT, mint TEXT, kind TEXT, action TEXT, at INTEGER, data TEXT);
       CREATE INDEX IF NOT EXISTS copy_events_at ON copy_events(at);
       CREATE INDEX IF NOT EXISTS copy_events_wallet ON copy_events(wallet, at);
+      -- Setuh trader activity feed (what the autonomous trader did, step by step)
+      CREATE TABLE IF NOT EXISTS setuh_activity (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, at INTEGER, type TEXT, mint TEXT, data TEXT);
+      CREATE INDEX IF NOT EXISTS setuh_activity_at ON setuh_activity(at);
       CREATE TABLE IF NOT EXISTS audit_log (
         id INTEGER PRIMARY KEY AUTOINCREMENT, at INTEGER, actor TEXT, book TEXT, action TEXT, detail TEXT);
       CREATE INDEX IF NOT EXISTS audit_log_at ON audit_log(at);
@@ -125,6 +129,10 @@ export class Store {
       ceCounts: q(`SELECT wallet, action, COUNT(*) n FROM copy_events GROUP BY wallet, action`),
       ceSeen: q(`SELECT 1 FROM copy_events WHERE wallet = ? AND signature = ? LIMIT 1`),
       cePrune: q(`DELETE FROM copy_events WHERE at < ? AND action = 'ignored'`),
+      actAdd: q(`INSERT INTO setuh_activity (at, type, mint, data) VALUES (?,?,?,?)`),
+      actRecent: q(`SELECT id, data FROM setuh_activity ORDER BY id DESC LIMIT ?`),
+      actPrune: q(`DELETE FROM setuh_activity WHERE at < ?`),
+      sigAll: q(`SELECT data FROM strategy_signals WHERE at >= ? ORDER BY at DESC LIMIT ?`),
       audit: q(`INSERT INTO audit_log (at, actor, book, action, detail) VALUES (?,?,?,?,?)`),
       auditRecent: q(`SELECT * FROM audit_log ORDER BY id DESC LIMIT ?`),
       pruneAudit: q(`DELETE FROM audit_log WHERE at < ?`),
@@ -273,6 +281,13 @@ export class Store {
   }
   copyEventCounts() { return this.s.ceCounts.all(); }
 
+  // ---- Setuh trader activity ----
+  addActivity(ev) { this.s.actAdd.run(ev.at ?? Date.now(), ev.type, ev.mint ?? '', JSON.stringify(ev)); }
+  recentActivity(limit = 200) {
+    return this.s.actRecent.all(limit).map((r) => { try { return { id: r.id, ...JSON.parse(r.data) }; } catch { return null; } }).filter(Boolean);
+  }
+  signalsSince(ms, limit = 5000) { return this.s.sigAll.all(ms, limit).map((r) => { try { return JSON.parse(r.data); } catch { return null; } }).filter(Boolean); }
+
   // ---- audit log ----
   audit(actor, book, action, detail = {}) {
     try { this.s.audit.run(Date.now(), actor, book ?? '', action, JSON.stringify(detail)); } catch { /* never block on the audit log */ }
@@ -320,6 +335,7 @@ export class Store {
   pruneOld(days = 14) {
     this.s.pruneAudit.run(Date.now() - 90 * 86400_000);
     this.s.cePrune.run(Date.now() - 14 * 86400_000);
+    this.s.actPrune.run(Date.now() - 30 * 86400_000);
     this.s.pruneSignals.run(Date.now() - 14 * 86400_000);
     this.s.prune.run(Date.now() - days * 86400_000);
     this.s.pruneSamples.run(Date.now() - 60 * 86400_000);

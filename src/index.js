@@ -19,6 +19,8 @@ import { Health } from './health.js';
 import { CandleService } from './candles.js';
 import { StrategyEngine } from './strategy/engine.js';
 import { CopyEngine } from './copy/engine.js';
+import { MarketData } from './market.js';
+import { Metrics, watchEventLoop } from './metrics.js';
 import { DEMO_TRADERS } from './feed.js';
 
 // Health monitor first: every outbound request from here on is counted by provider
@@ -92,27 +94,33 @@ log.info(`  Trend scanner: ${trends ? `on - Google Trends (${cfg.trendGeo}), Wik
 log.info(`  Phone alerts (ntfy): ${ntfy.enabled ? `on - in the ntfy app, subscribe to topic:  ${ntfy.topic}` : 'OFF'}`);
 if (telegram.enabled) log.info(`  Telegram: ${cfg.telegramChatId ? 'on' : 'token set - send /chatid to your bot to get your chat id'}`);
 
+// Live market data hub (stream-first prices with ages) and latency metrics
+const metrics = new Metrics();
+watchEventLoop(metrics);
+engine.metrics = metrics;
+const market = new MarketData({ engine, feed, metrics, chain: cfg.demo ? null : chain, log });
 engine.start();
 // background-loop heartbeat for System Health (the engine schedules its own loop)
 const engineTick = engine.tick.bind(engine);
 engine.tick = (now) => { try { engineTick(now); health.beat('Engine: discovery & scoring loop', 2000); } catch (e) { health.beat('Engine: discovery & scoring loop', 2000, false, e.message); throw e; } };
 const deepcheck = new DeepChecker({ chain: cfg.demo ? null : chain, store, cfg, engine, log });
 // Coin Check & Paper Trade: your own simulated positions (no real money, no wallet)
-const manual = new ManualPaper({ store, cfg, engine, feed, chain: cfg.demo ? null : chain, log });
+const manual = new ManualPaper({ store, cfg, engine, feed, market, chain: cfg.demo ? null : chain, log });
 manual.start(health);
 // Charts: GeckoTerminal OHLCV + candles from the bot's own live trades
-const candles = new CandleService({ engine, log });
+const candles = new CandleService({ engine, market, log });
 // Strategy section (System B): Setuh setups with their own paper book and budget
-const strategy = cfg.strategyEnabled ? new StrategyEngine({ cfg, engine, store, feed, candles, log }) : null;
+// Autonomous Setuh Scalping Paper Trader (System B): own balance, positions, journal; checks coins with Coin Check
+const strategy = cfg.strategyEnabled ? new StrategyEngine({ cfg, engine, store, feed, candles, market, deepcheck, metrics, log }) : null;
 strategy?.start(health);
 // Copy trading (System D): mirror followed wallets' buys, adds, partial sells and exits in its own paper book
-const copy = new CopyEngine({ cfg, store, engine, feed, chain: cfg.demo ? null : chain, log });
+const copy = new CopyEngine({ cfg, store, engine, feed, market, chain: cfg.demo ? null : chain, log });
 if (cfg.demo && !copy.traders.size) {
   for (const [i, w] of DEMO_TRADERS.entries()) {
     try { copy.addTrader(w, { label: i ? 'Demo quick trader' : 'Demo smart trader' }); } catch (e) { log.warn(`demo copy trader: ${e.message}`); }
   }
 }
 copy.start(health);
-startServer({ engine, store, cfg, deepcheck, manual, strategy, candles, health, paper, trends, copy, log });
+startServer({ engine, store, cfg, deepcheck, manual, strategy, candles, health, paper, trends, copy, market, metrics, log });
 telegram.poll();
 notifier.info(`🤖 Memecoin bot is running${cfg.demo ? ' (DEMO - fake coins)' : ''}. You'll get alerts here.`);

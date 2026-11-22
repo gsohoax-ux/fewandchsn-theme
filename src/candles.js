@@ -98,9 +98,16 @@ export class RateLimiter {
 }
 
 export class CandleService {
-  constructor({ engine = null, fetchFn = fetch, log = console, limiter = new RateLimiter(25, 60_000), now = () => Date.now() }) {
-    Object.assign(this, { engine, fetchFn, log, limiter, now });
+  constructor({ engine = null, market = null, fetchFn = fetch, log = console, limiter = new RateLimiter(25, 60_000), now = () => Date.now() }) {
+    Object.assign(this, { engine, market, fetchFn, log, limiter, now });
     this.cache = new Map(); // key -> { at, ttl, val | err }
+    this.viewed = new Map(); // mint -> last chart request (keeps the coin streaming while you look at it)
+    if (market) setInterval(() => { for (const [m, t] of this.viewed) if (this.now() - t > 5 * 60_000) { this.viewed.delete(m); market.untrack(m, 'chart'); } }, 60_000).unref?.();
+  }
+
+  #viewing(mint) {
+    if (!this.viewed.has(mint)) this.market.track(mint, 'chart');
+    this.viewed.set(mint, this.now());
   }
 
   async #cached(key, ttlMs, fn, errTtlMs = 30_000) {
@@ -197,6 +204,22 @@ export class CandleService {
     } else if (pool) {
       out.market = { priceUsd: pool.priceUsd, mcUsd: pool.mcUsd, liqUsd: pool.liqUsd, liqKind: 'pool reserves', onCurve: /pump-fun|pumpfun/i.test(pool.dex) && !/swap/i.test(pool.dex),
         source: 'GeckoTerminal', volumeUsd: pool.volumeUsd, changePct: pool.changePct, txns: pool.txns, dex: pool.dex, poolCreatedAt: pool.createdAt };
+    }
+    // newest price from the live stream: patch the forming candle and the header (never older data over newer)
+    if (this.market) {
+      this.#viewing(mint);
+      const q = this.market.get(mint);
+      if (q && q.ageMs < 15_000) {
+        out.market = { ...(out.market ?? {}), priceUsd: q.priceUsd, mcUsd: q.mcUsd, liqUsd: out.market?.liqUsd ?? q.liqUsd, onCurve: q.onCurve,
+          source: q.source, basis: q.basis, ageMs: q.ageMs, streaming: q.streaming };
+        if (out.candles.length) {
+          const step = TIMEFRAMES[tf].sec, bucket = Math.floor(this.now() / 1000 / step) * step;
+          const last = out.candles.at(-1);
+          const p = q.priceUsd; // both candle sources are per-token USD prices
+          if (last.t === bucket) Object.assign(last, { c: p, h: Math.max(last.h, p), l: Math.min(last.l, p) });
+          else if (bucket > last.t) out.candles = [...out.candles, { t: bucket, o: last.c, h: Math.max(last.c, p), l: Math.min(last.c, p), c: p, v: 0, forming: true }];
+        }
+      } else if (out.market) out.market.ageMs = q ? q.ageMs : null;
     }
     if (out.candles.length) {
       const cs = out.candles;

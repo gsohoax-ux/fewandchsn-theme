@@ -1,9 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { evalNewPairs, evalFinalA, evalFinalB, evalFinalC, evalMigrated, SETUPS, mergeConfig, rangeOf, peakIndex, flowOf, sellExhaustion } from '../src/strategy/setups.js';
-import { StrategyEngine } from '../src/strategy/engine.js';
-import { Coin } from '../src/coin.js';
-import { Store } from '../src/store.js';
 
 const NOW = 10_000_000;
 const D = (id) => ({ ...SETUPS[id].defaults });
@@ -146,78 +143,4 @@ test('config: unknown keys and bad values are ignored; other setups untouched', 
   assert.deepEqual(c.finalB, SETUPS.finalB.defaults);
 });
 
-// ---------------------------------------------------------------- engine integration
-function curveCoin(path, { start = NOW - 4 * 60_000, step = 20_000 } = {}) {
-  const coin = new Coin({ mint: 'StratCoin1111111111111111111111111111111pump', symbol: 'STRAT', name: 'Strategy Coin', traderPublicKey: 'DEV1',
-    marketCapSol: path[0], vSolInBondingCurve: 31 }, start);
-  coin.startMcSol = path[0];
-  path.forEach((mc, i) => {
-    const ts = start + i * step;
-    const side = i > 0 && mc < path[i - 1] ? 'sell' : 'buy';
-    coin.applyTrade({ txType: side, traderPublicKey: `W${i % 9}`, tokenAmount: 1e6, solAmount: 20, marketCapSol: mc, vSolInBondingCurve: 40, signature: `s${i}` }, ts);
-  });
-  return coin;
-}
-
-test('strategy engine: detects, explains and paper-enters in its own book; exits on its own stop', async () => {
-  const clock = { t: NOW };
-  const store = new Store(':memory:');
-  // launch $2K → $7.5K → pullback to a ~$3.3K floor, then fresh buying in the last minute
-  const path = [2000, 2600, 3500, 5000, 6500, 7500, 7000, 6000, 5000, 4200, 3600, 3300, 3400, 3350, 3450, 3300, 3400];
-  const coin = curveCoin(path, { start: NOW - path.length * 15_000, step: 15_000 });
-  for (let i = 0; i < 8; i++) coin.applyTrade({ txType: 'buy', traderPublicKey: `NEW${i}`, tokenAmount: 1e6, solAmount: 40, marketCapSol: 3400, vSolInBondingCurve: 40, signature: `n${i}` }, NOW - 40_000 + i * 4000);
-  coin.result = { safety: { ...SAFE, launchBundle: { wallets: 1, initialPct: 3, heldPct: 1 } }, narrative: { score: 62 }, insiderWallets: [] };
-  const fakeEngine = { solUsd: 1, coins: new Map([[coin.mint, coin]]), regime: () => ({ state: 'normal' }), logEvent() {} };
-  const cfg = { paperTz: 'UTC', paperFeePct: 1.25, paperTerminalFeePct: 1, paperTxFeeSol: 0.0015, paperMevPct: 2 };
-  const se = new StrategyEngine({ cfg, engine: fakeEngine, store, log: { warn() {} }, now: () => clock.t });
-  se.updateConfig({ setup: 'newPairs', values: { candleSec: 15, floorCandles: 4, floorMaxRangePct: 15 } });
-  for (const id of ['finalA', 'finalB', 'finalC']) se.updateConfig({ setup: id, values: { enabled: false } });
-  await se.scan();
-  const v = se.view();
-  assert.equal(v.open.length, 1, JSON.stringify(v.signals.map((s) => [s.status, s.reason, (s.unconfirmed ?? []).join(';')])));
-  const pos = v.open[0];
-  assert.equal(pos.origin, 'newPairs');
-  assert.equal(pos.book, 'strategy');
-  assert.equal(pos.budgetUsd, 10);
-  assert.ok(pos.levels.stop > 0 && pos.levels.target > pos.entryPriceUsd);
-  assert.match(pos.meta.why, /New Pairs · Launch pullback/);
-  assert.equal(v.signals[0].status, 'entered');
-  assert.equal(v.budget.spentUsd, 10);
-  assert.equal(store.simPositions('manual', 'open').length, 0, 'manual book untouched');
-  assert.equal(store.paperTradesSince(0).length, 0, 'System A untouched');
-
-  // no second entry for the same coin + setup (cooldown / already held)
-  await se.scan();
-  assert.equal(se.view().open.length, 1);
-
-  // price collapses through the invalidation level: the strategy's own stop sells it
-  se.onTrade({ mint: coin.mint, marketCapSol: 2000, vSolInBondingCurve: 33 });
-  const after = se.view();
-  assert.equal(after.open.length, 0);
-  assert.match(after.closed[0].exitReason, /Stop-loss/);
-  const perf = after.performance.bySetup.newPairs;
-  assert.equal(perf.trades, 1);
-  assert.equal(perf.losses, 1);
-  assert.equal(perf.entered, 1);
-  assert.ok(perf.feesUsd > 0);
-});
-
-test('strategy engine: budget, switches and validation', async () => {
-  const store = new Store(':memory:');
-  const se = new StrategyEngine({ cfg: { paperTz: 'UTC' }, engine: { solUsd: 1, coins: new Map() }, store, log: { warn() {} } });
-  assert.throws(() => se.updateConfig({ setup: 'nope', values: {} }), /Unknown setup/);
-  assert.throws(() => se.updateConfig({ setup: 'newPairs', values: { stopPct: -5 } }), /positive/);
-  assert.throws(() => se.updateConfig({ setup: 'newPairs', values: { hack: 1 } }), /Unknown setting/);
-  assert.throws(() => se.updateConfig({ values: { dailyUsd: 10, perTradeUsd: 20 } }), /cannot exceed/);
-  se.updateConfig({ values: { dailyUsd: 100, perTradeUsd: 25 } });
-  assert.equal(se.budget().leftUsd, 100);
-  se.updateConfig({ setup: 'migrated', values: { enabled: false } });
-  assert.equal(se.configView().setups.migrated.values.enabled, false);
-  assert.equal(se.configView().setups.newPairs.values.enabled, true, 'other setups untouched');
-  se.resetSetup('migrated');
-  assert.equal(se.configView().setups.migrated.values.enabled, true);
-  assert.throws(() => se.setTrackedDev('not a wallet'), /wallet/);
-  se.setTrackedDev('DevWa11et1111111111111111111111111111111111', { mode: 'follow', label: 'good dev' });
-  assert.equal(se.devReputation('DevWa11et1111111111111111111111111111111111').tracked, true);
-  assert.ok(store.recentAudit().some((a) => a.action === 'tracked-dev'));
-});
+// Engine (autonomous Setuh trader) tests live in test/setuh.test.js

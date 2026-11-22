@@ -22,11 +22,13 @@ export function extractAddress(input) {
 }
 
 export class ManualPaper {
-  constructor({ store, cfg, engine = null, feed = null, chain = null, fetchFn = fetch, log = console, now = () => Date.now() }) {
-    Object.assign(this, { store, cfg, engine, feed, chain, fetchFn, log });
+  constructor({ store, cfg, engine = null, feed = null, chain = null, market = null, fetchFn = fetch, log = console, now = () => Date.now() }) {
+    Object.assign(this, { store, cfg, engine, feed, chain, market, fetchFn, log });
     this.book = new PaperBook({ store, cfg, book: 'manual', getSolUsd: () => this.solUsd, log, now });
     this.#migrateOld();
-    feed?.on?.('trade', (m) => this.onTrade(m));
+    // with the market hub, prices are pushed in live (also after graduation); otherwise the old feed + polling path
+    this.sync = market ? market.bindBook(this.book, 'manual') : null;
+    if (!market) feed?.on?.('trade', (m) => this.onTrade(m));
   }
 
   get solUsd() { return this.engine?.solUsd ?? 0; }
@@ -52,7 +54,7 @@ export class ManualPaper {
   }
 
   start(health = null) {
-    const loop = () => this.poll();
+    const loop = () => (this.sync ? this.sync() : this.poll());
     if (health) health.job('Manual positions: prices + exits', loop, 10_000);
     else { setInterval(() => loop().catch((e) => this.log.warn(`paper positions: ${e.message}`)), 10_000).unref?.(); loop().catch(() => {}); }
   }
@@ -88,6 +90,18 @@ export class ManualPaper {
 
   /** Current market snapshot for a coin: live bot data if it tracks it, else DexScreener. */
   async snapshot(mint) {
+    if (this.market) {
+      // freshest price from the live stream (refreshed if it can't vouch for it), never an old snapshot
+      this.market.track(mint, 'manual');
+      const r = await this.market.quote(mint, { maxAgeMs: 10_000, needLiquidity: true });
+      if (r.ok) {
+        const q = r.quote;
+        const c = this.engine?.coins.get(mint);
+        return { mint, symbol: q.symbol || c?.symbol || '', name: c?.name ?? '', priceUsd: q.priceUsd, mcUsd: q.mcUsd, supply: 1e9, onCurve: q.onCurve,
+          vSol: q.vSol ?? (q.onCurve && this.solUsd > 0 ? curveVSolFromMc(q.mcUsd / this.solUsd) : null), liqUsd: q.liqUsd, source: q.source, ageMs: q.ageMs };
+      }
+      if (r.quote) throw new Error(`Live price not reliable right now: ${r.reason}. New paper positions are blocked until fresh data returns.`);
+    }
     const c = this.engine?.coins.get(mint);
     const solUsd = this.solUsd;
     if (c && !c.migrated && solUsd > 0 && c.mcSol > 0) {
