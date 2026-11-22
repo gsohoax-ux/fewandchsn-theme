@@ -8,6 +8,7 @@ import { computeConfidence } from './confidence.js';
 import { featurize } from './learn.js';
 import { matchCoin } from './xwatch.js';
 import { CopyIndex, detectDeployTool } from './copies.js';
+import { liquidityRead } from './liquidity.js';
 import { dexPaid } from './dexscreener.js';
 
 const MAX_PARALLEL_EVALS = 4;
@@ -502,7 +503,9 @@ export class Engine {
     const insiderWallets = coin.result?.insiderWallets ?? this.#insiders(coin, chainData);
     const insiderHeldAtEval = coin.result?.insiderHeldAtEval ?? insiderWallets.reduce((s, w) => s + coin.holderPct(w), 0);
     const outcomes = this.store.similarOutcomes(score, now - 14 * 86400_000);
-    coin.result = { at: now, stage, score, light, safety, momentum, narrative, confidence, x, trend, learned, outcomes, dexPaid: paid, insiderWallets,
+    const liquidity = this.solUsd > 0 && !coin.migrated
+      ? liquidityRead({ onCurve: true, vSol: coin.vSol, mcUsd: coin.mcSol * this.solUsd, solUsd: this.solUsd, orderUsd: cfg.checkOrderUsd }) : null;
+    coin.result = { at: now, stage, score, light, safety, momentum, narrative, confidence, x, trend, learned, outcomes, liquidity, dexPaid: paid, insiderWallets,
       insiderHeldAtEval, events: coin.result?.events ?? [] };
     this.counters.evaluated++;
     if (!coin.counted) {
@@ -600,7 +603,7 @@ export class Engine {
       confidence: r?.confidence ?? null, x: r?.x ?? null, trend: r?.trend ?? null,
       deployTool: coin.deployTool ?? null, copyOf: coin.copyOf ?? null,
       label: !r ? null : r.safety.verdict === 'AVOID' ? 'DO NOT BUY' : coin.alert && r.safety.verdict === 'SAFE' && !coin.warningsSent.has('insider-dump') && !coin.warningsSent.has('dev-sell') ? 'BUY ZONE' : r.safety.verdict === 'SAFE' ? 'LOW RISK' : 'WATCH',
-      spark: coin.spark(), outcomes: r ? this.store.similarOutcomes(r.score) : null, runner: r?.runner ?? null, learned: r?.learned ?? null, dexPaid: r?.dexPaid ?? null,
+      spark: coin.spark(), outcomes: r ? this.store.similarOutcomes(r.score) : null, runner: r?.runner ?? null, liquidity: r?.liquidity ?? null, learned: r?.learned ?? null, dexPaid: r?.dexPaid ?? null,
       events: r?.events ?? [],
       alert: coin.alert ? { ...coin.alert, peakMult: coin.alert.mcSol ? coin.peakMcSinceAlert / coin.alert.mcSol : 1 } : null,
     };

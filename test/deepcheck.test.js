@@ -80,7 +80,7 @@ test('flags active mint authority and missing liquidity after graduation', async
   assert.equal(r.verdict, 'AVOID');
   const txt = r.checks.map((c) => `${c.level}:${c.text}`).join('\n');
   assert.match(txt, /bad:Mint authority is ACTIVE/);
-  assert.match(txt, /bad:Liquidity \$300/);
+  assert.match(txt, /bad:Pool liquidity \$300 = 0\.8% of market cap \(HIGH RISK: thin liquidity\)/);
 });
 
 test('rejects things that are not token addresses', async () => {

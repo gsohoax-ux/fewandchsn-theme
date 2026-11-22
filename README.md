@@ -167,6 +167,16 @@ graduated and older coins, even ones the bot never saw. In 10–30 seconds you g
 - **The bot's live read**, if it's tracking the coin
 - **Couldn't check:** anything that failed is listed, so you know how solid the verdict is
 
+- **Honeypot & tax:** Token-2022 transfer tax, transfer hooks that can block selling, permanent delegates,
+  frozen-by-default accounts, non-transferable tokens, freeze authority, and "buys but zero sells"
+- **Liquidity & slippage:** liquidity vs market cap (a low ratio is flagged HIGH RISK), slippage and price move
+  for $30 / $50 / $100 / $500 buys given the pool's depth, and a **cash-out check**: what selling would
+  really bring if your trade grew 5x on paper. Paper gains can't be cashed out in a thin pool.
+  `CHECK_ORDER_USD` (50) is your planned trade size.
+
+History numbers ("coins like this", runner signs) are **past results, not forecasts**. The bot never presents a
+multiple as a likely outcome.
+
 Needs the Helius key for the on-chain parts. Results are cached for 2 minutes. A clean check lowers the risk
 but can't rule out a rug, since devs can still sell.
 

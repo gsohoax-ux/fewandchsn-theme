@@ -76,6 +76,9 @@ export const config = {
   paperRunnerTrailPct: num('PAPER_RUNNER_TRAIL_PCT', 30),
   paperRunnerMaxHoldMin: num('PAPER_RUNNER_MAX_HOLD_MIN', 180),
 
+  // Trade-size checks: slippage and cash-out are calculated for an order this size (your planned trade)
+  checkOrderUsd: num('CHECK_ORDER_USD', 50),
+
   // Self-learning
   learnTarget: num('LEARN_TARGET', 1.5),             // "a hit" = coin reached this multiple after scoring
   learnHorizonMin: num('LEARN_HORIZON_MIN', 120),    // how long after scoring we watch the outcome

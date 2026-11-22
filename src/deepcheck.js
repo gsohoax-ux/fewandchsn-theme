@@ -5,8 +5,10 @@
 // found, and anything that couldn't be checked is listed so you know how solid the verdict is.
 import { fetchMetadata, socialKey } from './narrative.js';
 import { detectDeployTool } from './copies.js';
+import { liquidityRead, liquidityLines } from './liquidity.js';
 
 const SYSTEM_PROGRAM = '11111111111111111111111111111111';
+const TOKEN_2022 = 'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb';
 const MINT_RE = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 const fmtPct = (x) => `${x.toFixed(1)}%`;
 const usd = (x) => (x >= 1e6 ? `$${(x / 1e6).toFixed(2)}M` : x >= 1e3 ? `$${(x / 1e3).toFixed(1)}k` : `$${x.toFixed(0)}`);
@@ -100,14 +102,37 @@ export function judge(f, cfg = {}) {
     if (s.deployTool) add('Socials', 'info', `Launched with ${s.deployTool} (quick deploy)`);
   }
 
+  // Honeypot & taxes: can you actually sell, and what does each trade cost?
+  if (f.mintAuthority !== undefined) {
+    const t = f.token ?? {};
+    if (t.transferFeeBps > 0) add('Honeypot & tax', t.transferFeeBps >= 500 ? 'bad' : 'warn', `Transfer tax ${(t.transferFeeBps / 100).toFixed(2)}% on every buy AND sell`);
+    if (t.transferHook) add('Honeypot & tax', 'bad', 'Transfer hook: a program runs on every transfer and could block selling (honeypot risk)');
+    if (t.permanentDelegate) add('Honeypot & tax', 'bad', 'Permanent delegate: someone can move or burn tokens from your wallet');
+    if (t.defaultFrozen) add('Honeypot & tax', 'bad', 'New token accounts start FROZEN: you may not be able to sell');
+    if (t.nonTransferable) add('Honeypot & tax', 'bad', 'Token is non-transferable: it cannot be sold');
+    if (f.freezeAuthority) add('Honeypot & tax', 'bad', 'Freeze authority active: your tokens could be frozen so you can\'t sell (honeypot risk)');
+    if (!t.transferFeeBps && !t.transferHook && !t.permanentDelegate && !t.defaultFrozen && !t.nonTransferable && !f.freezeAuthority) {
+      add('Honeypot & tax', 'ok', t.is2022 ? 'Token-2022 with no tax, hook or delegate found' : 'Standard token: no transfer tax or sell-blocking features');
+    }
+  } else add('Honeypot & tax', 'unknown', 'Token program features not checked (taxes, transfer hooks)');
+  if (f.market && f.market.buys1h >= 10 && f.market.sells1h === 0) {
+    add('Honeypot & tax', 'bad', `${f.market.buys1h} buys and 0 sells in the last hour: nobody is selling, possible honeypot`);
+  }
+  if (f.market?.onCurve) add('Honeypot & tax', 'info', 'On the bonding curve: holders can always sell back to the curve');
+
+  // Liquidity & slippage for your trade size
+  if (f.liquidity) {
+    const L = f.liquidity;
+    const lines = liquidityLines(L);
+    add('Liquidity', L.ratioPct != null && L.ratioPct < (L.onCurve ? 2 : 5) || L.realLiqUsd < 1000 ? 'bad' : L.ratioPct != null && L.ratioPct < (L.onCurve ? 5 : 10) ? 'warn' : 'ok', lines[0]);
+    add('Liquidity', L.order.avgPct > 15 ? 'bad' : L.order.avgPct > 5 ? 'warn' : 'ok', lines[1]);
+    add('Liquidity', L.cash.lossPct > 15 ? 'warn' : 'info', lines[2]);
+  } else add('Liquidity', 'unknown', 'Liquidity depth not known: slippage can\'t be estimated');
+
   // Market
   if (f.market) {
     const m = f.market;
     add('Market', 'info', `${m.onCurve ? 'Still on the bonding curve' : `Trading on ${m.dex}`} · MC ${usd(m.mcUsd)} · 24h volume ${usd(m.vol24)}${m.ageH != null ? ` · ${m.ageH < 48 ? `${m.ageH.toFixed(1)}h` : `${(m.ageH / 24).toFixed(0)}d`} old` : ''}`);
-    if (!m.onCurve) {
-      const ratio = m.mcUsd ? m.liqUsd / m.mcUsd : 0;
-      add('Market', m.liqUsd < 1000 ? 'bad' : ratio < 0.05 ? 'warn' : 'ok', `Liquidity ${usd(m.liqUsd)} (${(ratio * 100).toFixed(1)}% of market cap)${m.liqUsd < 1000 ? ': almost none, you may not be able to sell' : ''}`);
-    }
     if (m.buys1h + m.sells1h >= 20) {
       const r = m.buys1h / Math.max(1, m.sells1h);
       add('Market', r < 0.5 ? 'warn' : 'info', `Last hour: ${m.buys1h} buys / ${m.sells1h} sells${r < 0.5 ? ' (heavy selling)' : ''}`);
@@ -184,6 +209,16 @@ export class DeepChecker {
     if (info) {
       f.mintAuthority = info.mintAuthority ?? null;
       f.freezeAuthority = info.freezeAuthority ?? null;
+      const ext = new Map((info.extensions ?? []).map((e) => [e.extension, e.state ?? {}]));
+      const fee = ext.get('transferFeeConfig');
+      f.token = {
+        is2022: mintInfo.value.owner === TOKEN_2022,
+        transferFeeBps: Number(fee?.newerTransferFee?.transferFeeBasisPoints ?? fee?.olderTransferFee?.transferFeeBasisPoints ?? 0),
+        transferHook: Boolean(ext.get('transferHook')?.programId),
+        permanentDelegate: Boolean(ext.get('permanentDelegate')?.delegate),
+        defaultFrozen: ext.get('defaultAccountState')?.accountState === 'frozen',
+        nonTransferable: ext.has('nonTransferable'),
+      };
       supply = Number(info.supply) / 10 ** (info.decimals ?? 6);
     }
 
@@ -204,6 +239,14 @@ export class DeepChecker {
         buys1h: p.txns?.h1?.buys ?? 0, sells1h: p.txns?.h1?.sells ?? 0,
         ageH: p.pairCreatedAt ? (Date.now() - p.pairCreatedAt) / 3600_000 : null, url: p.url,
       };
+    }
+    {
+      const solUsd = this.engine?.solUsd ?? 0;
+      const tracked = this.engine?.coins.get(mint);
+      if (f.market) {
+        f.liquidity = liquidityRead({ onCurve: f.market.onCurve, vSol: tracked && !tracked.migrated ? tracked.vSol : null,
+          liqUsd: f.market.liqUsd, mcUsd: f.market.mcUsd, solUsd, orderUsd: this.cfg.checkOrderUsd ?? 50 });
+      }
     }
     if (rug) f.rugcheck = { score: rug.score_normalised ?? rug.score ?? null, risks: (rug.risks ?? []).map((r) => ({ name: r.name, level: r.level, description: r.description })) };
 
@@ -325,7 +368,7 @@ export class DeepChecker {
     }
 
     return {
-      mint, name: f.name, symbol: f.symbol, image: f.image, ...j, at: Date.now(), tookMs: Date.now() - t0,
+      mint, name: f.name, symbol: f.symbol, image: f.image, ...j, at: Date.now(), tookMs: Date.now() - t0, liquidity: f.liquidity ?? null,
       creator: f.creator ?? null, market: f.market ?? null, rugcheck: f.rugcheck ?? null, live,
       links: { pump: `https://pump.fun/coin/${mint}`, dexscreener: f.market?.url || `https://dexscreener.com/solana/${mint}`,
         solscan: `https://solscan.io/token/${mint}`, rugcheck: `https://rugcheck.xyz/tokens/${mint}`,

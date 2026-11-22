@@ -1,5 +1,7 @@
 // Combine safety, narrative and momentum into one score + Telegram/dashboard text.
 
+import { liquidityLines } from './liquidity.js';
+
 export function combine(safety, narrative, momentum, learnedPct = null, blend = 0.5) {
   let score = 0.35 * narrative.score + 0.35 * momentum.score + 0.30 * safety.score;
   // Once the bot has learned (and proven) what works, mix in its learned ranking
@@ -34,14 +36,18 @@ function confLine(r) {
   return c ? `🎯 Confidence ${c.label} ${c.meter} (${c.value})${c.track ? ` · similar past alerts hit 1.5x ${c.track.hitPct}% of the time` : ''}` : '';
 }
 
+function liqLines(r) {
+  return liquidityLines(r.liquidity).map((l, i) => `${i === 0 ? '💧' : '  '} ${l}`);
+}
+
 function runnerLine(r) {
-  return r.runner?.is ? `🚀 RUNNER POTENTIAL ${r.runner.score}/100: ${r.runner.reasons.join(' · ')}` : '';
+  return r.runner?.is ? `🚀 RUNNER SIGNS ${r.runner.score}/100 (not a forecast): ${r.runner.reasons.join(' · ')}` : '';
 }
 
 function outcomesLine(r) {
   const o = r.outcomes;
   if (!o) return '';
-  return `📊 Coins scored ${o.scoreFrom}-${o.scoreTo} before (${o.n}): typical peak +${o.medianPeakPct.toFixed(0)}% · ${o.hit2}% reached 2x` +
+  return `📊 Past results, not a forecast: of ${o.n} coins scored ${o.scoreFrom}-${o.scoreTo}, the typical peak was +${o.medianPeakPct.toFixed(0)}% and ${o.hit2}% reached 2x` +
     (o.medianDropPct != null ? ` · typical drop −${o.medianDropPct.toFixed(0)}%` : '');
 }
 
@@ -80,6 +86,7 @@ export function formatAlert(coin, r, stage, { solUsd, padreTemplate } = {}) {
     `MC ${fmtMc(coin.mcSol, solUsd)} · Curve ${coin.progress.toFixed(0)}% · Age ${fmtAge(coin.ageSec())} · ${m.holders} holders`,
     esc(runnerLine(r)),
     esc(confLine(r)),
+    ...liqLines(r).map(esc),
     esc(learnedLine(r)),
     esc(outcomesLine(r)),
     ...xLines(r).map(esc),
@@ -109,6 +116,7 @@ export function alertNotification(coin, r, stage, { solUsd, padreTemplate, dashb
     `${coin.name} · MC ${fmtMc(coin.mcSol, solUsd)} · Curve ${coin.progress.toFixed(0)}% · ${fmtAge(coin.ageSec())} · ${m.holders} holders`,
     runnerLine(r),
     confLine(r),
+    ...liqLines(r),
     learnedLine(r),
     outcomesLine(r),
     ...xLines(r),
