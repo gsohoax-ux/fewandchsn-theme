@@ -111,7 +111,7 @@ export function startServer({ engine, store, cfg, deepcheck = null, manual = nul
       const s = engine.status();
       return {
         ...(health ? health.view({ store }) : { providers: [], jobs: [], db: null }),
-        feed: { connected: s.feedConnected, lastDataSec: s.feedLastDataSec, reconnects: s.feedReconnects, problem: s.feedProblem, demo: s.demo },
+        feed: { connected: s.feedConnected, lastDataSec: s.feedLastDataSec, reconnects: s.feedReconnects, problem: s.feedProblem, demo: s.demo, lastCreateSec: s.feedLastCreateSec, lastTradeSec: s.feedLastTradeSec, tradesHealthy: s.feedTradesHealthy, watched: s.feedWatched, counts: s.feedCounts, lastAck: s.feedLastAck, solStale: s.solStale },
         services: { helius: s.helius, ai: s.ai, notify: s.notify, x: s.x, trends: Boolean(trends), paper: Boolean(paper?.enabled), strategy: Boolean(strategy), learning: Boolean(engine.learner) },
         solUsd: s.solUsd, desk: { pipeline: s.pipeline, alertBar: s.alertMinScore, alertAdaptive: s.alertAdaptive, paused: s.paused },
         events: engine.events.slice(-120).reverse(), audit: store.recentAudit(40),
@@ -137,7 +137,7 @@ export function startServer({ engine, store, cfg, deepcheck = null, manual = nul
     'GET /api/latency': () => {
       const s = engine.status();
       const m = metrics?.view() ?? { timings: {}, rates: {}, gauges: {} };
-      return { ...m, market: market?.view() ?? null, feed: { connected: s.feedConnected, lastDataSec: s.feedLastDataSec, reconnects: s.feedReconnects, problem: s.feedProblem, demo: s.demo },
+      return { ...m, market: market?.view() ?? null, feed: { connected: s.feedConnected, lastDataSec: s.feedLastDataSec, reconnects: s.feedReconnects, problem: s.feedProblem, demo: s.demo, lastCreateSec: s.feedLastCreateSec, lastTradeSec: s.feedLastTradeSec, tradesHealthy: s.feedTradesHealthy, watched: s.feedWatched, counts: s.feedCounts, lastAck: s.feedLastAck, solStale: s.solStale },
         solUsd: s.solUsd, solUsdAgeSec: s.solUsdAgeSec };
     },
     'GET /api/setuh': () => need(strategy, 'Setuh trader').view(),

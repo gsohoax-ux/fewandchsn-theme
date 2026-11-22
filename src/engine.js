@@ -72,10 +72,35 @@ export class Engine {
       try {
         const r = await fetch(url, { signal: AbortSignal.timeout(8000) });
         const price = Number(pick(await r.json()));
-        if (price > 0) { this.solUsd = price; this.solUsdAt = Date.now(); this.solUsdSource = new URL(url).hostname; return; }
+        if (price > 0) {
+          if (this.solFailStreak) this.log.info(`SOL/USD price recovered: $${price.toFixed(2)} from ${new URL(url).hostname} after ${this.solFailStreak} failed refresh(es)`);
+          else if (!this.solUsdAt) this.log.info(`SOL/USD price loaded: $${price.toFixed(2)} from ${new URL(url).hostname}`);
+          this.solUsd = price; this.solUsdAt = Date.now(); this.solUsdSource = new URL(url).hostname; this.solFailStreak = 0; return;
+        }
       } catch { /* try the next source */ }
     }
+    this.solFailStreak = (this.solFailStreak ?? 0) + 1;
     if (!this.solUsd) this.log.warn('SOL price unavailable - market caps shown in SOL');
+    // previously silent: a SOL price that stopped refreshing kept being used forever
+    else if (this.solFailStreak === 1 || this.solFailStreak % 10 === 0) {
+      this.log.warn(`SOL/USD refresh failed on all sources (${this.solFailStreak}x in a row) - last price $${this.solUsd} is ${Math.round((Date.now() - this.solUsdAt) / 1000)}s old`);
+    }
+  }
+
+  /**
+   * Why a NEW paper entry must not use this coin's current price (null = data is fine). Measured at the moment of the
+   * entry (never the time scoring started). No per-coin age limit: a quiet curve coin on a working, proven
+   * subscription has an exact price, so AI-narrative / X / trend / re-check alerts on slow coins still qualify.
+   * Exits and position monitoring never go through this: they keep running on the last known data.
+   */
+  entryDataProblem(coin, at = Date.now()) {
+    if (this.cfg.demo) return null;
+    if (!(this.solUsd > 0)) return 'stale data: SOL/USD price unavailable';
+    const solAge = this.solUsdAt ? at - this.solUsdAt : Infinity;
+    if (solAge > this.cfg.solMaxAgeSec * 1000) return `stale data: SOL/USD price ${Math.round(solAge / 1000)}s old`;
+    if (typeof this.feed.tradesHealthy === 'function' && !this.feed.tradesHealthy()) return 'stale data: live trade stream not confirmed (new coins arriving, trades not)';
+    if (typeof this.feed.tradeProven === 'function' && !this.feed.tradeProven(coin.mint)) return 'stale data: no trade received for this coin since it was subscribed (price not verified live)';
+    return null;
   }
 
   onCreate(msg) {
@@ -184,7 +209,7 @@ export class Engine {
       progress: c.progress, buyers: c.organicBuyerCount(), score: c.result?.score ?? null,
       verdict: c.result?.safety.verdict ?? null, light: c.result?.light ?? '', x: Boolean(c.xMatch), trend: Boolean(c.trendMatch),
       deployTool: c.deployTool ?? null, copy: Boolean(c.copyOf), spark: c.spark(16, 30 * 60_000, now), runner: Boolean(c.result?.runner?.is),
-      alerted: Boolean(c.alert),
+      alerted: Boolean(c.alert), lastTradeSec: c.trades.length ? Math.round((now - c.trades.at(-1).ts) / 1000) : null,
     });
     const live = [...this.coins.values()].filter((c) => !c.migrated);
     const isNew = (c) => c.ageSec(now) < cfg.newPairMaxMin * 60 && c.progress < cfg.finalStretchPct;
@@ -618,6 +643,7 @@ export class Engine {
       mint: coin.mint, symbol: coin.symbol, name: coin.name, image: coin.meta?.image ?? '',
       ageSec: Math.round(coin.ageSec()), mcSol: coin.mcSol, progress: coin.progress, migrated: coin.migrated,
       holders: coin.holders().length, trades: coin.tradeCount, devSold: coin.devSold,
+      lastTradeSec: coin.trades.length ? Math.round((Date.now() - coin.trades.at(-1).ts) / 1000) : null,
       twitter: coin.meta?.twitter ?? '', telegram: coin.meta?.telegram ?? '', description: coin.meta?.description ?? '',
       links: coin.links(this.cfg.padreUrlTemplate),
       score: r?.score ?? null, light: r?.light ?? '', stage: r?.stage ?? null, evaluatedAt: r?.at ?? null,
@@ -661,6 +687,14 @@ export class Engine {
       demo: this.cfg.demo, feedConnected: this.feedConnected, paused: this.paused,
       feedProblem: this.feedProblem ?? '', feedLastDataSec: this.feed.lastMsgAt ? Math.round((Date.now() - this.feed.lastMsgAt) / 1000) : null,
       feedReconnects: this.feed.reconnects ?? 0,
+      // discovery (new coins) and trades are separate streams: one can work while the other is silent
+      feedLastCreateSec: this.feed.lastCreateAt ? Math.round((Date.now() - this.feed.lastCreateAt) / 1000) : null,
+      feedLastTradeSec: this.feed.lastTradeAt ? Math.round((Date.now() - this.feed.lastTradeAt) / 1000) : null,
+      feedTradesHealthy: this.feed.tradesHealthy ? this.feed.tradesHealthy() : null,
+      feedWatched: this.feed.watched?.size ?? null,
+      feedCounts: this.feed.counts ?? null,
+      feedLastAck: this.feed.lastAck ?? null,
+      solStale: !(this.solUsd > 0) || !this.solUsdAt || Date.now() - this.solUsdAt > this.cfg.solMaxAgeSec * 1000,
       tracked: this.coins.size, ...this.counters, solUsd: this.solUsd, solUsdAgeSec: this.solUsdAt ? Math.round((Date.now() - this.solUsdAt) / 1000) : null,
       helius: Boolean(this.chain?.enabled), ai: this.ai?.enabled ? this.cfg.aiModel : (this.ai?.disabledReason || 'off'),
       notify: this.notifier.channels,

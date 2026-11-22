@@ -38,7 +38,7 @@ const chain = cfg.demo ? new DemoChain() : new HeliusChain({
   rpcUrl: cfg.heliusRpcUrl, apiUrl: cfg.heliusApiUrl, apiKey: cfg.heliusKey, concurrency: cfg.heliusConcurrency,
 });
 const xSource = cfg.demo ? new DemoXSource() : cfg.xBearerToken ? new XApiSource({ token: cfg.xBearerToken }) : null;
-const feed = cfg.demo ? new DemoFeed(chain, log, xSource) : new PumpPortalFeed(cfg.pumpportalUrl, log);
+const feed = cfg.demo ? new DemoFeed(chain, log, xSource) : new PumpPortalFeed(cfg.pumpportalUrl, log, { tradeSilenceMs: cfg.feedTradeSilenceSec * 1000 });
 const store = new Store(cfg.demo ? ':memory:' : cfg.dbPath);
 // Audit trail of starts: if the database never remembers an earlier start, it is not on persistent storage
 const boots = store.getKv('boots') ?? [];
@@ -52,7 +52,7 @@ const notifier = new Notifier({ ntfy, telegram, cfg, getSolUsd: () => engine.sol
 if (cfg.demo) cfg.xPollSec = 15;
 const xwatch = new XWatcher({ source: xSource, ai, cfg, notifier, log });
 const learner = new Learner({ store, cfg, log });
-const paper = new PaperTrader({ cfg, store, log, getSolUsd: () => engine.solUsd, getRegime: () => engine.regime(),
+const paper = new PaperTrader({ cfg, store, log, getSolUsd: () => engine.solUsd, getDataProblem: (coin) => engine.entryDataProblem(coin), getRegime: () => engine.regime(),
   moonbagWorthy: (mint) => engine.moonbagWorthy(mint),
   onEvent: (agent, coin, text, level) => {
     if (text.startsWith('skipped: ')) funnel.count(`auto:skip:${reasonKey(text.slice(9))}`);

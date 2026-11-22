@@ -181,7 +181,11 @@ export class StrategyEngine {
     return null;
   }
 
-  feedOk() { return this.market ? this.market.feedHealthy(15_000) : Boolean(this.engine?.feedConnected ?? true); }
+  /** New entries need TRADES flowing (new-coin messages alone don't count). Older market hubs: message health. */
+  feedOk() {
+    if (!this.market) return Boolean(this.engine?.feedConnected ?? true);
+    return typeof this.market.tradeFeedOk === 'function' ? this.market.tradeFeedOk() : this.market.feedHealthy(15_000);
+  }
 
   // ---------------------------------------------------------------- market events
   onTrade(msg) { // only without the market hub

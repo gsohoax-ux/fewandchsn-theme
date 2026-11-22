@@ -90,6 +90,9 @@ onState((s) => {
   const feedState = !st.feedConnected ? false : age == null ? null : age <= 2 ? true : age <= 10 ? null : false;
   $('#status').innerHTML = (st.demo ? '<span class="chip demo">DEMO DATA</span>' : '') +
     chip(feedState, st.feedConnected ? (age != null && age > 10 ? `Feed stale ${age}s` : 'Feed live') : 'Feed offline', st.feedConnected ? `last data ${age ?? '?'}s ago · ${st.feedReconnects} reconnects` : st.feedProblem) +
+    // discovery can keep flowing while trades stop: show that separately, loudly
+    (st.feedConnected && st.feedTradesHealthy === false ? chip(false, `Trades stale ${st.feedLastTradeSec ?? '—'}s`, 'New coins arrive but no trade messages: prices frozen, new paper entries blocked, open positions still monitored') : '') +
+    (!st.demo && st.solStale ? chip(false, 'SOL price stale', `SOL/USD ${st.solUsdAgeSec ?? '?'}s old: new paper entries blocked`) : '') +
     chip(st.helius ? true : null, 'Helius', st.helius ? 'On-chain checks on' : 'Add HELIUS_API_KEY for bundle tracing') +
     chip(String(st.ai).startsWith('claude') ? true : null, `AI ${aiName(st.ai)}`, String(st.ai)) +
     chip(st.notify.length ? true : null, 'Alerts', st.notify.length ? st.notify.join(' + ') : 'No alert channel') +

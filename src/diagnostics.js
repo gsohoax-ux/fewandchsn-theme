@@ -34,8 +34,13 @@ export function diagnose({ cfg, engine, store, paper = null, manual = null, stra
   const comp = [];
   const add = (name, status, evidence) => comp.push({ name, status, evidence });
   const jobsOk = (re) => { const j = job(re); return !j.length ? null : j.every((x) => x.state === 'ok') ? true : false; };
-  add('PumpPortal connection', st.demo ? 'working (demo simulator)' : st.feedConnected ? (st.feedLastDataSec != null && st.feedLastDataSec <= 10 ? 'working' : 'partially working') : 'not working',
-    `${st.feedConnected ? 'connected' : 'disconnected'} · last data ${st.feedLastDataSec ?? '?'}s ago · ${st.feedReconnects} reconnects since start${st.feedProblem ? ` · last problem: ${st.feedProblem}` : ''}`);
+  add('PumpPortal connection (socket only)', st.demo ? 'working (demo simulator)' : st.feedConnected ? (st.feedLastDataSec != null && st.feedLastDataSec <= 10 ? 'working' : 'partially working') : 'not working',
+    `${st.feedConnected ? 'connected' : 'disconnected'} · last message of any kind ${st.feedLastDataSec ?? '?'}s ago · ${st.feedReconnects} reconnects since start${st.feedProblem ? ` · last problem: ${st.feedProblem}` : ''}`);
+  const fc = st.feedCounts ?? {};
+  add('Discovery stream (new coins)', st.demo ? 'working (demo simulator)' : !st.feedConnected ? 'not working' : st.feedLastCreateSec == null ? 'unable to verify' : st.feedLastCreateSec <= 60 ? 'working' : 'partially working',
+    `last new coin ${st.feedLastCreateSec ?? '?'}s ago · ${fc.creates ?? '?'} create messages since connect`);
+  add('Trade stream (live prices)', st.demo ? 'working (demo simulator)' : !st.feedConnected ? 'not working' : st.feedTradesHealthy === false ? 'not working' : st.feedLastTradeSec == null ? 'unable to verify' : 'working',
+    `last trade message ${st.feedLastTradeSec ?? 'never'}${st.feedLastTradeSec != null ? 's ago' : ''} · ${fc.trades ?? '?'} trades since connect · ${st.feedWatched ?? '?'} coins subscribed · ${fc.subscribeMsgs ?? '?'} subscribe messages sent · ${fc.acks ?? '?'} server acks · ${fc.serverErrors ?? 0} server errors · ${fc.resubscribes ?? 0} re-subscribes · ${fc.tradeWatchdogReconnects ?? 0} watchdog reconnects${st.feedLastAck ? ` · last ack: ${String(st.feedLastAck).slice(0, 120)}` : ''}`);
   const launches = C['discovery:new'] ?? 0;
   add('New coin discovery', launches ? 'working' : st.launches ? 'working' : 'unable to verify', `${launches} new coins in the last ${F.hoursCovered || '<1'} h recorded · ${Math.round(M.rates?.launches ?? 0)}/min right now · ${C['discovery:duplicate'] ?? 0} duplicate create messages ignored`);
   add('WebSocket stability', (C['feed:disconnect'] ?? 0) > 20 ? 'partially working' : 'working', `${C['feed:disconnect'] ?? 0} disconnects in window · reconnect p50 ${T('feedReconnect')?.p50 != null ? Math.round(T('feedReconnect').p50) + ' ms' : 'n/a'}`);
@@ -138,6 +143,11 @@ export function diagnose({ cfg, engine, store, paper = null, manual = null, stra
   const qw = T('evalQueueWait');
   if (qw?.n >= 10 && qw.p95 > 30_000) find('high', 2, 'Coins wait too long to be scored', `evaluation queue wait p50 ${Math.round(qw.p50 / 1000)} s · p95 ${Math.round(qw.p95 / 1000)} s · queue now ${M.gauges?.evalQueue?.value ?? 0}`,
     'Coins are scored late, so alerts and setups trigger late or not at all. Raise evaluation parallelism only if Helius has headroom; the queue is already prioritised (Final Stretch first).', 'More parallel evaluations = more Helius calls.');
+  if (!st.demo && st.feedConnected && st.feedTradesHealthy === false) find('critical', 1, 'Trade messages missing while discovery continues',
+    `last trade ${st.feedLastTradeSec ?? 'never'}${st.feedLastTradeSec != null ? 's' : ''} ago · last new coin ${st.feedLastCreateSec ?? '?'}s ago · ${st.feedWatched ?? '?'} coins subscribed · ${(st.feedCounts?.serverErrors) ?? 0} server errors`,
+    'Prices are frozen: new paper entries are blocked automatically, open positions keep being monitored on the last data and DexScreener. Check the Railway log for "server says" / "trade messages missing" lines and the PumpPortal checklist (API key, subscription limits).',
+    'None from the check itself; entries stay blocked until trades resume.');
+  if (!st.demo && !(st.solUsd > 0)) find('critical', 1, 'SOL price unavailable', 'no source answered since start', 'All USD prices are wrong; paper entries are blocked. Check Coinbase / Kraken / CoinGecko reachability.');
   if (st.solUsdAgeSec != null && st.solUsdAgeSec > 120) find('high', 1, 'SOL price is stale', `${st.solUsdAgeSec}s old`, 'All price sources failing: check Coinbase / Kraken / CoinGecko reachability in System Health.');
   if (stale.length) find('high', 1, 'Open positions are not receiving prices', stale.map((s) => `${s.book} ${s.symbol || s.mint.slice(0, 6)}: ${s.staleSec}s`).join(', '), 'Check DexScreener health; graduated coins without PumpSwap trades depend on it.');
   if (!H.db?.persistent && !st.demo) find('critical', 1, 'Database is not on persistent storage', `path ${H.db?.path}`, 'Attach a Railway volume at /app/data (DB_PATH=data/pump-scout.db).');

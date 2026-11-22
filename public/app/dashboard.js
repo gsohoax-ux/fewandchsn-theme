@@ -75,12 +75,16 @@ function badges(c) {
   return `${c.runner ? '<span class="tag up" title="Runner potential">RUN</span> ' : ''}${c.x ? '<span class="tag info" title="Rides a viral X post">X</span> ' : ''}${c.trend ? '<span class="tag info" title="Matches a confirmed trend">TREND</span> ' : ''}${c.deployTool ? `<span class="tag" title="Launched with ${esc(c.deployTool)}">QD</span> ` : ''}${c.copy ? '<span class="tag warn" title="Copy of an earlier coin">COPY</span> ' : ''}`;
 }
 
+// Age of a coin's price = time since its last live trade. Grey when fresh, amber > 30 s, red > 120 s.
+const priceAge = (sec) => sec == null ? '<span class="faint" title="No trade received for this coin yet">no trades</span>'
+  : `<span class="${sec > 120 ? 'down' : sec > 30 ? 'warn' : 'faint'}" title="Seconds since the last live trade on this coin">price ${fmt.age(sec)} old</span>`;
+
 function board(B) {
   if (!B) return '<div class="empty">Waiting for launches…</div>';
   const row = (c) => `<li data-open="${esc(c.mint)}">
     <span class="sym">$${esc(c.symbol)} <span class="muted" style="font-weight:400">${esc(c.name).slice(0, 26)}</span></span>
     <span>${c.score != null ? `<span class="score ${scoreCls(c.score, c.verdict)}">${c.score}</span>` : '<span class="faint small">scoring…</span>'}</span>
-    <span class="sub">${spark(c.spark, 44, 12)} ${fmt.mcSol(c.mcSol)} · <span class="prog"><i style="width:${c.progress.toFixed(0)}%"></i></span>${c.progress.toFixed(0)}% · ${fmt.age(c.ageSec)} · ${c.buyers} buyers</span>
+    <span class="sub">${spark(c.spark, 44, 12)} ${fmt.mcSol(c.mcSol)} · <span class="prog"><i style="width:${c.progress.toFixed(0)}%"></i></span>${c.progress.toFixed(0)}% · ${fmt.age(c.ageSec)} · ${c.buyers} buyers · ${priceAge(c.lastTradeSec)}</span>
     <span class="sub" style="text-align:right">${badges(c)}<span class="v-${c.verdict ?? ''}">${c.alerted ? 'ALERTED · ' : ''}${c.verdict ?? ''}</span></span></li>`;
   const col = (cl, title, sub, items, empty) => `<div class="col ${cl}"><h3><span>${title}</span><span class="faint">${sub}</span></h3>
     <ul data-keep="${cl}">${items.length ? items.map(row).join('') : `<div class="empty">${empty}</div>`}</ul></div>`;
@@ -89,7 +93,7 @@ function board(B) {
 
 function ranking(coins) {
   if (!coins?.length) return '<div class="empty">Waiting for coins to get traction…</div>';
-  return `<div class="scroll-x" data-keep="rank" style="max-height:520px"><table class="t"><thead><tr><th>Score</th><th>Coin</th><th>Label</th><th>Safety</th><th class="hide-sm">Confidence</th><th class="r hide-sm">Narr.</th><th class="r hide-sm">Mom.</th><th class="r">MC</th><th class="hide-sm">Curve</th><th class="r hide-sm">Age</th><th class="r hide-sm">Holders</th></tr></thead><tbody>
+  return `<div class="scroll-x" data-keep="rank" style="max-height:520px"><table class="t"><thead><tr><th>Score</th><th>Coin</th><th>Label</th><th>Safety</th><th class="hide-sm">Confidence</th><th class="r hide-sm">Narr.</th><th class="r hide-sm">Mom.</th><th class="r">MC</th><th class="hide-sm">Curve</th><th class="r hide-sm">Age</th><th class="r hide-sm">Price age</th><th class="r hide-sm">Holders</th></tr></thead><tbody>
   ${coins.map((c) => `<tr class="click" data-open="${esc(c.mint)}">
     <td><span class="score ${scoreCls(c.score, c.safety.verdict)}">${c.score}</span></td>
     <td><div class="b">${badges({ runner: c.runner?.is, x: c.x, deployTool: c.deployTool, copy: c.copyOf })}$${esc(c.symbol)}${c.migrated ? ' <span class="tag">GRAD</span>' : ''}${c.devSold ? ' <span class="tag warn" title="Dev sold">DEV SOLD</span>' : ''}</div><div class="tiny muted" style="max-width:180px;overflow:hidden;text-overflow:ellipsis">${esc(c.name)}</div></td>
@@ -99,7 +103,7 @@ function ranking(coins) {
     <td class="r num hide-sm">${c.narrative.score}</td><td class="r num hide-sm">${c.momentum.score}</td>
     <td class="r num">${fmt.mcSol(c.mcSol)}<div>${spark(c.spark, 56, 14)}</div></td>
     <td class="hide-sm"><span class="prog"><i style="width:${c.progress.toFixed(0)}%"></i></span><span class="num small">${c.progress.toFixed(0)}%</span></td>
-    <td class="r num hide-sm">${fmt.age(c.ageSec)}</td><td class="r num hide-sm">${c.holders}</td></tr>`).join('')}
+    <td class="r num hide-sm">${fmt.age(c.ageSec)}</td><td class="r num hide-sm">${priceAge(c.lastTradeSec)}</td><td class="r num hide-sm">${c.holders}</td></tr>`).join('')}
   </tbody></table></div>`;
 }
 
@@ -273,8 +277,11 @@ function system(s) {
   const st = s.status;
   const dot = (state) => `<span class="dot ${state === 'ok' ? 'ok' : state === 'degraded' || state === 'late' || state === 'waiting' ? 'warn' : state === 'idle' ? '' : 'bad'}"></span>`;
   const svc = [
-    ['Market feed (PumpPortal)', H.feed.connected ? 'ok' : 'down', H.feed.connected ? `live · last data ${H.feed.lastDataSec ?? '?'}s ago · ${H.feed.reconnects} reconnects` : `offline${H.feed.problem ? ': ' + H.feed.problem : ''}`],
-    ['SOL price', H.solUsd > 0 ? 'ok' : 'down', H.solUsd > 0 ? `$${H.solUsd.toFixed(2)}` : 'unavailable — market caps shown in SOL'],
+    ['Market feed socket (PumpPortal)', H.feed.connected ? 'ok' : 'down', H.feed.connected ? `connected · last message ${H.feed.lastDataSec ?? '?'}s ago · ${H.feed.reconnects} reconnects` : `offline${H.feed.problem ? ': ' + H.feed.problem : ''}`],
+    ['Discovery stream (new coins)', !H.feed.connected ? 'down' : H.feed.demo || (H.feed.lastCreateSec != null && H.feed.lastCreateSec <= 60) ? 'ok' : 'degraded', H.feed.lastCreateSec != null ? `last new coin ${H.feed.lastCreateSec}s ago` : 'no new coin yet'],
+    ['Trade stream (live prices)', !H.feed.connected ? 'down' : H.feed.tradesHealthy === false ? 'down' : H.feed.lastTradeSec == null && !H.feed.demo ? 'waiting' : 'ok',
+      `${H.feed.lastTradeSec != null ? `last trade ${H.feed.lastTradeSec}s ago` : 'no trade received yet'} · ${H.feed.watched ?? '?'} coins subscribed · ${H.feed.counts?.trades ?? '?'} trades · ${H.feed.counts?.serverErrors ?? 0} server errors${H.feed.tradesHealthy === false ? ' — NEW PAPER ENTRIES BLOCKED' : ''}`],
+    ['SOL price', !(H.solUsd > 0) ? 'down' : H.feed.solStale ? 'degraded' : 'ok', H.solUsd > 0 ? `$${H.solUsd.toFixed(2)}${H.feed.solStale ? ' — STALE, paper entries blocked' : ''}` : 'unavailable — market caps shown in SOL'],
     ['On-chain checks (Helius)', H.services.helius ? 'ok' : 'idle', H.services.helius ? 'on' : 'off — add HELIUS_API_KEY for bundle tracing'],
     ['AI narrative (Claude)', String(H.services.ai).startsWith('claude') ? 'ok' : 'idle', String(H.services.ai).startsWith('claude') ? H.services.ai : `off (${esc(H.services.ai)}) — rule-based fallback in use`],
     ['Notifications', H.services.notify.length ? 'ok' : 'idle', H.services.notify.length ? H.services.notify.join(' + ') : 'off'],
@@ -323,13 +330,17 @@ function latencyPanel() {
   if (!L) return card('Live data & latency', '<div class="muted small">Measuring…</div>');
   const T = L.timings ?? {}, R = L.rates ?? {};
   const feedAge = L.market?.feedLastMsgAgeMs ?? (L.feed.lastDataSec != null ? L.feed.lastDataSec * 1000 : null);
-  const [fc, word] = freshState(feedAge, L.feed.connected);
+  // Health is judged on TRADE messages: new-coin messages alone must never make prices look live
+  const tradeAge = L.market?.feedLastTradeAgeMs ?? (L.feed.lastTradeSec != null ? L.feed.lastTradeSec * 1000 : null);
+  const [fc, word] = L.feed.tradesHealthy === false ? ['bad', 'TRADES MISSING'] : freshState(tradeAge ?? feedAge, L.feed.connected);
   const row = (label, key, note = '') => { const t = T[key]; return `<tr><td>${label}</td><td class="r num">${t?.n ? ms(t.p50) : '—'}</td><td class="r num">${t?.n ? ms(t.p95) : '—'}</td><td class="r num">${t?.n ? ms(t.last) : '—'}</td><td class="r num muted">${t?.n ?? 0}</td><td class="small muted wrap">${note}</td></tr>`; };
   const solAge = L.solUsdAgeSec;
   return card('Live data & latency', `
     <div class="kpis" style="margin-bottom:12px">
       <div class="kpi"><small>Feed status</small><b><span class="dot ${fc}"></span> ${word}</b><span>${L.feed.demo ? 'demo simulator' : 'PumpPortal websocket'} · ${L.feed.reconnects} reconnects</span></div>
-      <div class="kpi"><small>Last feed message</small><b>${feedAge != null ? ms(feedAge) : '—'}</b><span>ago</span></div>
+      <div class="kpi"><small>Last trade message</small><b class="${L.feed.tradesHealthy === false ? 'down' : ''}">${tradeAge != null ? ms(tradeAge) : '—'}</b><span>ago · ${L.feed.counts?.trades ?? '?'} trades since connect</span></div>
+      <div class="kpi"><small>Last new coin</small><b>${L.market?.feedLastCreateAgeMs != null ? ms(L.market.feedLastCreateAgeMs) : '—'}</b><span>ago · discovery stream</span></div>
+      <div class="kpi"><small>Last message (any)</small><b>${feedAge != null ? ms(feedAge) : '—'}</b><span>ago · socket alive</span></div>
       <div class="kpi"><small>Price updates</small><b>${Math.round(R.priceUpdates ?? 0)}/min</b><span>${L.market ? `${L.market.counts.curveTrades} curve · ${L.market.counts.ammTrades} PumpSwap trades` : ''}</span></div>
       <div class="kpi"><small>Coins pinned on stream</small><b>${L.market?.tracked ?? 0}</b><span>positions, candidates, charts</span></div>
       <div class="kpi"><small>New coins</small><b>${Math.round(R.launches ?? 0)}/min</b><span>discovered</span></div>
@@ -347,7 +358,7 @@ function latencyPanel() {
       ${row('Simulated execution', 'execution', 'Fresh quote, re-check and fill')}
       ${row('Price refresh (DexScreener)', 'priceRefresh', 'Only when the live stream can\'t vouch for a price')}
     </tbody></table></div>
-    <p class="tiny muted" style="margin-bottom:0">Healthy ≤ 2 s since the last feed message · delayed ≤ 10 s · stale beyond that. New Setuh entries are blocked while the feed is stale or disconnected, and whenever a price is older than the trader's max data age. A paper trader can't have zero latency: every simulated fill uses the newest price the bot had at that moment.</p>`, new Date().toLocaleTimeString());
+    <p class="tiny muted" style="margin-bottom:0">Healthy ≤ 2 s since the last TRADE message · delayed ≤ 10 s · stale beyond that (new-coin messages don't count). New paper entries are blocked while the trade stream or SOL price is stale; open positions keep being monitored. New Setuh entries are blocked while the feed is stale or disconnected, and whenever a price is older than the trader's max data age. A paper trader can't have zero latency: every simulated fill uses the newest price the bot had at that moment.</p>`, new Date().toLocaleTimeString());
 }
 
 // ------------------------------------------------------------------ diagnostics (live audit)

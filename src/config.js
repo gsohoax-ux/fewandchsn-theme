@@ -100,6 +100,9 @@ export const config = {
   paperTz: env('PAPER_TZ', 'America/Chicago'),       // when a new day starts
   paperSizePct: num('PAPER_SIZE_PCT', 45),           // % of equity per trade: fewer, bigger trades so fixed fees matter less
   paperMaxOpen: num('PAPER_MAX_OPEN', 2),
+  // Market-data freshness (new entries only; exits never wait for fresh data)
+  solMaxAgeSec: num('SOL_MAX_AGE_SEC', 120), // SOL/USD refreshes every 30 s; older than this = stale
+  feedTradeSilenceSec: num('FEED_TRADE_SILENCE_SEC', 60), // no trade on ANY watched coin this long = trade stream broken
   paperStopPct: num('PAPER_STOP_PCT', 35),           // sell if the PRICE falls this % below the entry
   paperTrailStartPct: num('PAPER_TRAIL_START_PCT', 30), // trailing stop starts after the price rises this %
   paperTrailPct: num('PAPER_TRAIL_PCT', 20),         // ...and sells after the price drops this % from its best

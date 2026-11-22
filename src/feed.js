@@ -5,9 +5,27 @@
 import { EventEmitter } from 'node:events';
 
 export class PumpPortalFeed extends EventEmitter {
-  constructor(url, log = console) {
+  /**
+   * opts.tradeSilenceMs: trade messages must arrive at least this often while ≥ opts.minWatchedForWatchdog coins
+   * are subscribed; otherwise re-subscribe, and if trades still don't come back, reconnect.
+   * opts.WebSocketImpl / opts.now: injectable for tests.
+   */
+  constructor(url, log = console, { tradeSilenceMs = 60_000, minWatchedForWatchdog = 10, statusLogMs = 5 * 60_000, WebSocketImpl = globalThis.WebSocket, now = () => Date.now(), backoffMs = 1000,
+    watchdogBackoffMs = [2, 5, 15, 30].map((m) => m * 60_000) } = {}) {
     super();
     this.url = url; this.log = log;
+    Object.assign(this, { tradeSilenceMs, minWatchedForWatchdog, WebSocketImpl, now, backoffMs, watchdogBackoffMs });
+    this.watchdogStrikes = 0;        // watchdog reconnects in a row without a trade in between (picks the backoff step)
+    this.resubscribedThisConn = false; // the watchdog re-subscribes at most ONCE per connection
+    this.subAt = new Map();          // mint -> when its subscribeTokenTrade was actually sent on THIS connection
+    this.mintTradeAt = new Map();    // mint -> last trade message received for it (subscribed coins only)
+    // separate health signals: discovery (new coins) vs trades (prices)
+    this.lastCreateAt = 0;
+    this.lastTradeAt = 0;
+    this.connectedAt = 0;
+    this.counts = { creates: 0, trades: 0, migrations: 0, acks: 0, serverErrors: 0, subscribeMsgs: 0, keysSubscribed: 0, resubscribes: 0, tradeWatchdogReconnects: 0 };
+    this.lastAck = '';
+    this.resubscribedAt = 0;
     this.watched = new Set();
     this.pendingSub = new Set();
     this.pendingUnsub = new Set();
@@ -16,16 +34,76 @@ export class PumpPortalFeed extends EventEmitter {
     this.pendingAccSub = new Set();
     this.pendingAccUnsub = new Set();
     this.connected = false;
-    this.backoff = 1000;
+    this.backoff = backoffMs;
     this.lastMsgAt = 0;
     this.lastProblem = '';
     this.reconnects = 0;
-    setInterval(() => this.#flush(), 300).unref();
+    setInterval(() => this.flush(), 300).unref();
     // Watchdog: a connection can stay "open" but stop delivering data. New coins launch every few
     // seconds, so 90s of silence means the feed is stuck - drop it and reconnect.
     setInterval(() => {
-      if (this.connected && Date.now() - this.lastMsgAt > 90_000) this.failCurrent?.('no data for 90s');
+      if (this.connected && this.now() - this.lastMsgAt > 90_000) this.failCurrent?.('no data for 90s');
     }, 15_000).unref();
+    // Trade watchdog: new-coin messages alone must not make the feed look healthy
+    setInterval(() => this.checkTrades(), 15_000).unref();
+    // A periodic status line, so the logs show whether trades are actually flowing
+    if (statusLogMs) setInterval(() => this.log.info(`PumpPortal status: ${this.statusLine()}`), statusLogMs).unref();
+  }
+
+  statusLine() {
+    const t = this.now(), ago = (x) => (x ? `${Math.round((t - x) / 1000)}s ago` : 'never');
+    return `${this.connected ? 'connected' : 'DISCONNECTED'} · ${this.watched.size} coins subscribed · last new coin ${ago(this.lastCreateAt)} · last trade ${ago(this.lastTradeAt)} · ` +
+      `${this.counts.creates} new coins / ${this.counts.trades} trades since start · ${this.counts.acks} subscription acks · ${this.counts.serverErrors} server errors · ${this.reconnects} reconnects`;
+  }
+
+  /**
+   * Trades healthy = connected AND at least one trade arrived on THIS connection (unconfirmed after a (re)connect
+   * until then) AND, when enough coins are subscribed to judge, a trade arrived within maxSilenceMs.
+   */
+  tradesHealthy(maxSilenceMs = this.tradeSilenceMs) {
+    if (!this.connected || !this.lastTradeAt || this.lastTradeAt < this.connectedAt) return false;
+    if (this.watched.size < this.minWatchedForWatchdog) return true;
+    return this.now() - this.lastTradeAt <= maxSilenceMs;
+  }
+
+  /** This coin's subscription is proven: a trade for it arrived after its subscription was sent on this connection. */
+  tradeProven(mint) {
+    const s = this.subAt.get(mint), t = this.mintTradeAt.get(mint);
+    return s != null && t != null && t >= s;
+  }
+
+  /**
+   * Discovery continues but trades stopped.
+   * Step 1 (once per connection): after tradeSilenceMs of silence, re-subscribe everything.
+   * Step 2: reconnect only after watchdogBackoffMs[strikes] of silence on this connection (2, 5, 15, then every 30 min),
+   * so a feed that never sends trades costs at most one re-subscribe burst + one reconnect per step - never a loop.
+   * The step resets as soon as any trade arrives. New entries stay blocked the whole time (tradesHealthy() is false).
+   */
+  checkTrades() {
+    if (!this.connected || this.watched.size < this.minWatchedForWatchdog) return;
+    const t = this.now();
+    const since = Math.max(this.lastTradeAt, this.connectedAt);
+    const silent = t - since;
+    if (silent <= this.tradeSilenceMs) return;
+    const lastNew = this.lastCreateAt ? Math.round((t - this.lastCreateAt) / 1000) + 's ago' : 'never';
+    if (!this.resubscribedThisConn) {
+      this.resubscribedThisConn = true;
+      this.resubscribedAt = t;
+      this.counts.resubscribes++;
+      for (const m of this.watched) this.pendingSub.add(m);
+      for (const a of this.accounts) this.pendingAccSub.add(a);
+      this.log.warn(`PumpPortal: no trade messages for ${Math.round(silent / 1000)}s while ${this.watched.size} coins are subscribed (last new coin ${lastNew}) — re-subscribing once on this connection; new paper entries blocked`);
+      this.emit('status', { connected: true, trades: false, problem: 'trade messages missing' });
+      return;
+    }
+    const steps = this.watchdogBackoffMs;
+    const wait = steps[Math.min(this.watchdogStrikes, steps.length - 1)];
+    if (silent < wait) return;
+    this.watchdogStrikes++;
+    this.counts.tradeWatchdogReconnects++;
+    const next = steps[Math.min(this.watchdogStrikes, steps.length - 1)];
+    this.log.warn(`PumpPortal: still no trade messages after ${Math.round(silent / 60_000)} min (re-subscribe did not help; last new coin ${lastNew}) — watchdog reconnect #${this.watchdogStrikes}; next one only after ${Math.round(next / 60_000)} min more silence`);
+    this.failCurrent?.(`no trade messages for ${Math.round(silent / 1000)}s even after re-subscribing`);
   }
 
   start() { this.#connect(); }
@@ -37,7 +115,7 @@ export class PumpPortalFeed extends EventEmitter {
    * could leave the bot offline forever.)
    */
   #connect() {
-    const ws = new WebSocket(this.url);
+    const ws = new this.WebSocketImpl(this.url);
     this.ws = ws;
     let finished = false;
     const fail = (why) => {
@@ -51,16 +129,19 @@ export class PumpPortalFeed extends EventEmitter {
       this.lastProblem = `${new Date().toISOString().slice(11, 19)} ${why}`;
       this.emit('status', { connected: false, problem: this.lastProblem });
       this.log.warn(`PumpPortal ${why} - reconnecting in ${this.backoff / 1000}s`);
-      setTimeout(() => this.#connect(), this.backoff);
+      setTimeout(() => this.#connect(), this.backoff).unref?.(); // the HTTP server keeps the process alive
       this.backoff = Math.min(this.backoff * 2, 30_000);
     };
     this.failCurrent = fail;
     const openTimer = setTimeout(() => fail('connection timed out'), 15_000);
+    openTimer.unref?.();
 
     ws.onopen = () => {
       clearTimeout(openTimer);
-      this.connected = true; this.backoff = 1000; this.lastMsgAt = Date.now();
-      this.log.info('PumpPortal connected');
+      this.connected = true; this.backoff = this.backoffMs; this.lastMsgAt = this.now(); this.connectedAt = this.now(); this.resubscribedAt = 0; this.resubscribedThisConn = false;
+      this.subAt.clear(); this.mintTradeAt.clear(); // every coin must prove its subscription again on the new connection
+      // "connected" = the websocket opened. Subscriptions are confirmed separately (acks) and by trades arriving.
+      this.log.info(`PumpPortal connected (websocket open) — subscribing to new coins, migrations and ${this.watched.size} coins' trades`);
       this.emit('status', { connected: true });
       ws.send(JSON.stringify({ method: 'subscribeNewToken' }));
       ws.send(JSON.stringify({ method: 'subscribeMigration' }));
@@ -68,42 +149,69 @@ export class PumpPortalFeed extends EventEmitter {
       for (const a of this.accounts) this.pendingAccSub.add(a);
     };
     ws.onmessage = (ev) => {
-      const rx = Date.now();
+      const rx = this.now();
       this.lastMsgAt = rx;
       let msg;
       try { msg = JSON.parse(ev.data); } catch { return; }
       if (msg && typeof msg === 'object') msg._rx = rx; // when the bot received it (for freshness and latency)
       if (!msg.mint || !msg.txType) {
-        // Subscription confirmations are normal; anything that looks like an error is logged (rate limits, bans...)
+        // Not a market event: a subscription acknowledgement, or an error (rate limits, bans, bad keys...)
         const text = JSON.stringify(msg).slice(0, 300);
-        if (/error|limit|denied|invalid|banned|forbidden|exceed|too many/i.test(text)) {
+        if (/error|limit|denied|invalid|banned|forbidden|exceed|too many|unauthori|payment|balance/i.test(text)) {
+          this.counts.serverErrors++;
           this.lastProblem = `${new Date().toISOString().slice(11, 19)} server says: ${text}`;
           this.log.warn(`PumpPortal ${this.lastProblem}`);
+        } else {
+          this.counts.acks++;
+          this.lastAck = text;
+          if (this.counts.acks <= 3 || this.counts.acks % 500 === 0) this.log.info(`PumpPortal ack #${this.counts.acks}: ${text}`);
         }
         return;
       }
-      if (msg.txType === 'create') this.emit('create', msg);
-      else if (msg.txType === 'buy' || msg.txType === 'sell') this.emit('trade', msg);
-      else if (msg.txType === 'migrate' || msg.txType === 'migration') this.emit('migrate', msg);
+      if (msg.txType === 'create') { this.lastCreateAt = rx; this.counts.creates++; this.emit('create', msg); }
+      else if (msg.txType === 'buy' || msg.txType === 'sell') {
+        if (!this.lastTradeAt) this.log.info(`PumpPortal: first trade message received (${msg.pool ?? 'pump'} ${msg.txType})`);
+        this.lastTradeAt = rx; this.counts.trades++; this.watchdogStrikes = 0;
+        if (this.watched.has(msg.mint)) this.mintTradeAt.set(msg.mint, rx);
+        this.emit('trade', msg);
+      } else if (msg.txType === 'migrate' || msg.txType === 'migration') { this.counts.migrations++; this.emit('migrate', msg); }
+      else {
+        this.counts.serverErrors++;
+        this.log.warn(`PumpPortal: unrecognised message type "${String(msg.txType).slice(0, 40)}" — ignored`);
+      }
     };
     ws.onclose = (ev) => fail(`closed (code ${ev?.code ?? '?'}${ev?.reason ? `, reason: ${ev.reason}` : ''})`);
     ws.onerror = (ev) => fail(`connection error${ev?.message ? `: ${ev.message}` : ''}`);
   }
 
   watch(mint) { this.watched.add(mint); this.pendingUnsub.delete(mint); this.pendingSub.add(mint); }
-  unwatch(mint) { if (this.pinned.has(mint)) return; this.watched.delete(mint); this.pendingSub.delete(mint); this.pendingUnsub.add(mint); }
+  unwatch(mint) { if (this.pinned.has(mint)) return; this.watched.delete(mint); this.pendingSub.delete(mint); this.pendingUnsub.add(mint); this.subAt.delete(mint); this.mintTradeAt.delete(mint); }
   pin(mint) { this.pinned.add(mint); }
   unpin(mint) { this.pinned.delete(mint); }
   /** Follow every trade a wallet makes (copy trading). */
   watchAccount(w) { this.accounts.add(w); this.pendingAccUnsub.delete(w); this.pendingAccSub.add(w); }
   unwatchAccount(w) { this.accounts.delete(w); this.pendingAccSub.delete(w); this.pendingAccUnsub.add(w); }
 
-  #flush() {
-    if (!this.connected || this.ws?.readyState !== WebSocket.OPEN) return;
+  /** Send queued (un)subscriptions in batches of 100 (runs every 300 ms). */
+  flush() {
+    if (!this.connected || this.ws?.readyState !== 1 /* OPEN */) return;
     const send = (method, set) => {
       const keys = [...set]; set.clear();
       for (let i = 0; i < keys.length; i += 100) {
-        this.ws.send(JSON.stringify({ method, keys: keys.slice(i, i + 100) }));
+        try {
+          this.ws.send(JSON.stringify({ method, keys: keys.slice(i, i + 100) }));
+          this.counts.subscribeMsgs++;
+          if (method === 'subscribeTokenTrade') {
+            this.counts.keysSubscribed += Math.min(100, keys.length - i);
+            const at = this.now();
+            for (const k of keys.slice(i, i + 100)) this.subAt.set(k, at);
+          }
+        } catch (e) {
+          // put them back: they are sent again on the next flush or after reconnecting
+          for (const k of keys.slice(i)) set.add(k);
+          this.log.warn(`PumpPortal: ${method} send failed (${e.message}) — will retry`);
+          return;
+        }
       }
     };
     if (this.pendingSub.size) send('subscribeTokenTrade', this.pendingSub);
@@ -152,7 +260,16 @@ export class DemoFeed extends EventEmitter {
     this.reconnects = 0;
     setInterval(() => { this.lastMsgAt = Date.now(); }, 1000).unref?.(); // the simulator is always "connected"
   }
-  emit(type, msg) { if (msg && typeof msg === 'object' && type !== 'status') { msg._rx = Date.now(); this.lastMsgAt = msg._rx; } return super.emit(type, msg); }
+  emit(type, msg) {
+    if (msg && typeof msg === 'object' && type !== 'status') {
+      msg._rx = Date.now(); this.lastMsgAt = msg._rx;
+      if (type === 'trade') this.lastTradeAt = msg._rx; else if (type === 'create') this.lastCreateAt = msg._rx;
+    }
+    return super.emit(type, msg);
+  }
+  tradesHealthy() { return true; } // the simulator always delivers trades for watched coins
+  tradeProven() { return true; }
+  statusLine() { return 'demo simulator'; }
   watch(m) { this.watched.add(m); }
   unwatch(m) { if (this.pinned.has(m)) return; this.watched.delete(m); }
   pin(m) { this.pinned.add(m); }

@@ -29,11 +29,38 @@ export class MarketData extends EventEmitter {
 
   get solUsd() { return this.engine?.solUsd ?? 0; }
 
-  /** Live stream is healthy: connected and delivering messages right now. */
+  /** Discovery stream healthy: connected and delivering messages of any kind (new coins count). */
   feedHealthy(maxSilenceMs = 5000) {
     if (!this.feed) return false;
     const connected = this.feed.connected ?? this.engine?.feedConnected;
     return Boolean(connected) && this.feed.lastMsgAt > 0 && this.now() - this.feed.lastMsgAt <= maxSilenceMs;
+  }
+
+  /**
+   * TRADE stream healthy: connected AND a trade message (not just new-coin messages) arrived recently.
+   * Feeds that don't report trade timestamps fall back to general message health.
+   */
+  tradeStreamHealthy(maxSilenceMs = 10_000) {
+    if (!this.feed) return false;
+    if (this.feed.lastTradeAt === undefined) return this.feedHealthy(maxSilenceMs);
+    const connected = this.feed.connected ?? this.engine?.feedConnected;
+    return Boolean(connected) && this.feed.lastTradeAt > 0 && this.now() - this.feed.lastTradeAt <= maxSilenceMs;
+  }
+
+  /** Feed-level trade health (same rule the entry guards use). Feeds without it fall back to message health. */
+  tradeFeedOk() {
+    return typeof this.feed?.tradesHealthy === 'function' ? this.feed.tradesHealthy() : this.feedHealthy(15_000);
+  }
+
+  /** true/false when the feed can prove this coin's subscription delivers trades; null when it can't tell (legacy feed). */
+  subscriptionProven(mint) {
+    return typeof this.feed?.tradeProven === 'function' ? this.feed.tradeProven(mint) : null;
+  }
+
+  /** SOL/USD age: every USD price derived from a trade depends on it. */
+  solAgeMs() {
+    const at = this.engine?.solUsdAt;
+    return at ? this.now() - at : null;
   }
 
   /** Keep a coin's trades streaming (also after graduation) while `owner` needs it. */
@@ -113,15 +140,28 @@ export class MarketData extends EventEmitter {
   }
 
   /**
-   * How old the price is. For a coin on a healthy live stream, the price is current up to the stream's last
-   * message (no trade = no price change). Otherwise its age is the time since it was observed.
+   * How old the price is.
+   * "No trade = no price change" is only assumed when it is PROVEN that trades are arriving: the trade stream is
+   * alive (a trade arrived within 10 s on any subscribed coin) AND this coin itself traded within the quiet window
+   * (default 60 s). Then the price is current up to the last trade received anywhere. In every other case the age
+   * is the time since THIS coin's own last trade (or poll), so stale prices are refreshed or refused.
+   * New-coin (discovery) messages never make a price look fresh.
    */
-  freshness(mint) {
+  freshness(mint, { quietMs = 60_000 } = {}) {
     const e = this.prices.get(mint);
     if (!e) return { known: false, ageMs: Infinity, basis: 'no data' };
-    const streaming = e.live && this.isTracked(mint) && this.feedHealthy();
-    if (streaming) return { known: true, ageMs: Math.max(0, this.now() - this.feed.lastMsgAt), basis: `live stream (last trade ${Math.round((this.now() - e.lastTradeAt) / 1000)}s ago)`, streaming: true };
-    return { known: true, ageMs: this.now() - e.at, basis: e.live ? 'last live trade (stream not confirming now)' : `polled from ${e.source}`, streaming: false };
+    const ownAge = this.now() - (e.live ? e.lastTradeAt : e.at);
+    // A bonding-curve price only changes with a trade: a QUIET curve coin whose subscription is proven (it received a
+    // trade on this connection) is still exact while trades are demonstrably flowing. PumpSwap coins keep the quiet
+    // limit (their coverage by the trade stream is unverified).
+    const proven = e.live && e.onCurve && this.subscriptionProven(mint) === true;
+    const streaming = e.live && this.isTracked(mint) && this.tradeStreamHealthy() && (ownAge <= quietMs || proven);
+    if (streaming) {
+      const proofAt = this.feed.lastTradeAt ?? this.feed.lastMsgAt; // legacy feeds: general messages
+      return { known: true, ageMs: Math.max(0, this.now() - proofAt), ownAgeMs: ownAge, basis: ownAge > quietMs ? `live trade stream (quiet ${Math.round(ownAge / 1000)}s, subscription verified)` : `live trade stream (this coin traded ${Math.round(ownAge / 1000)}s ago)`, streaming: true };
+    }
+    const why = !e.live ? `polled from ${e.source}` : !this.tradeStreamHealthy() ? 'last live trade — trade stream not confirmed right now' : ownAge > quietMs ? `last live trade ${Math.round(ownAge / 1000)}s ago (quiet coin — needs re-check)` : 'last live trade (not subscribed)';
+    return { known: true, ageMs: ownAge, ownAgeMs: ownAge, basis: why, streaming: false };
   }
 
   get(mint) {
@@ -136,7 +176,12 @@ export class MarketData extends EventEmitter {
    * A price no older than maxAgeMs, or null with the reason. Refreshes from DexScreener when the stream can't vouch
    * for the price. needLiquidity: also require a known pool liquidity for graduated coins.
    */
-  async quote(mint, { maxAgeMs = 10_000, needLiquidity = false } = {}) {
+  async quote(mint, { maxAgeMs = 10_000, needLiquidity = false, maxSolAgeMs = 120_000 } = {}) {
+    // USD prices from trades are SOL prices × SOL/USD: a stale SOL/USD price makes every quote wrong
+    const solAge = this.solAgeMs();
+    if (this.engine && (!(this.solUsd > 0) || (solAge != null && solAge > maxSolAgeMs))) {
+      return { ok: false, quote: this.get(mint), reason: !(this.solUsd > 0) ? 'SOL/USD price unavailable' : `SOL/USD price is ${Math.round(solAge / 1000)}s old (limit ${Math.round(maxSolAgeMs / 1000)}s)` };
+    }
     let q = this.get(mint);
     const ok = (x) => x && x.ageMs <= maxAgeMs && (!needLiquidity || x.onCurve || (x.liqUsd != null && this.now() - (x.liqAt ?? 0) < 120_000));
     if (ok(q)) return { ok: true, quote: q };
@@ -157,7 +202,11 @@ export class MarketData extends EventEmitter {
       if (!s) return null;
       const now = this.now();
       const prev = this.prices.get(mint);
-      const liveNewer = prev?.live && now - prev.lastTradeAt < 30_000;
+      // A verified live bonding-curve price is never replaced by a polled one (DexScreener can lag the curve).
+      // Not when DexScreener says the coin has left the curve, and not when the trade stream is unconfirmed:
+      // then the polled price is the better fallback, as before. Liquidity is always taken.
+      const verifiedCurve = Boolean(prev?.live && prev.onCurve && s.onCurve !== false && this.subscriptionProven(mint) === true && this.tradeFeedOk());
+      const liveNewer = prev?.live && (now - prev.lastTradeAt < 30_000 || verifiedCurve);
       this.#set(liveNewer
         ? { ...prev, liqUsd: s.onCurve ? prev.liqUsd : s.liqUsd, liqAt: now, symbol: prev.symbol || s.symbol }
         : { mint, priceUsd: s.priceUsd, mcUsd: s.mcUsd, mcSol: this.solUsd ? s.mcUsd / this.solUsd : null, onCurve: s.onCurve, vSol: prev?.vSol ?? null,
@@ -186,7 +235,13 @@ export class MarketData extends EventEmitter {
   }
 
   view() {
-    return { tracked: this.owners.size, known: this.prices.size, counts: this.counts, feedHealthy: this.feedHealthy(),
-      feedLastMsgAgeMs: this.feed?.lastMsgAt ? this.now() - this.feed.lastMsgAt : null };
+    const age = (t) => (t ? this.now() - t : null);
+    return { tracked: this.owners.size, known: this.prices.size, counts: this.counts,
+      feedHealthy: this.feedHealthy(), // discovery / any message
+      tradeStreamHealthy: this.tradeStreamHealthy(),
+      feedLastMsgAgeMs: age(this.feed?.lastMsgAt),
+      feedLastTradeAgeMs: age(this.feed?.lastTradeAt),
+      feedLastCreateAgeMs: age(this.feed?.lastCreateAt),
+      solAgeMs: this.solAgeMs() };
   }
 }

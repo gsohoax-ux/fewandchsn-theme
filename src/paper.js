@@ -16,8 +16,8 @@ export function dayKey(ms, tz = 'UTC') {
 
 export class PaperTrader {
   constructor({ cfg, store, log = console, onEvent = () => {}, onNotify = async () => {}, getSolUsd = () => 0, getRegime = () => null,
-    moonbagWorthy = () => false, fetchFn = fetch }) {
-    Object.assign(this, { cfg, store, log, onEvent, onNotify, getSolUsd, getRegime, moonbagWorthy, fetchFn });
+    moonbagWorthy = () => false, fetchFn = fetch, getDataProblem = () => null }) {
+    Object.assign(this, { cfg, store, log, onEvent, onNotify, getSolUsd, getRegime, moonbagWorthy, fetchFn, getDataProblem });
     // Moonbags: small leftovers kept after graduation on strong coins. They live OUTSIDE the daily
     // budget (moved out at their value, like a sale), so each day stays clean, and get their own results.
     const mb = store.getKv('moonbags') ?? {};
@@ -107,6 +107,10 @@ export class PaperTrader {
     if (this.daily && !this.day) return this.#skip(coin, 'waiting for the SOL price to load today\'s budget');
     if (this.daily && this.cfg.paperStopAtLow && this.lowAlerted) return this.#skip(coin, `budget under $${this.cfg.paperLowUsd} - done for today`);
     if (this.positions.size >= this.cfg.paperMaxOpen) return this.#skip(coin, `max ${this.cfg.paperMaxOpen} open positions`);
+    // Never enter on a price that isn't proven live (exits are NOT gated: they keep working on the last data).
+    // Checked at THIS moment: `now` here can be when scoring started, tens of seconds ago.
+    const dataProblem = this.getDataProblem(coin);
+    if (dataProblem) return this.#skip(coin, dataProblem);
     let size = Math.min(this.cash, this.equity(coins) * (this.cfg.paperSizePct / 100));
     // Network fees are fixed per trade: if the normal size is too small, use the smallest size that
     // keeps them under the limit (when there's enough cash) instead of skipping the trade
