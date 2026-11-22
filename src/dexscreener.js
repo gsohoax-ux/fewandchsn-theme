@@ -27,3 +27,37 @@ export async function dexPaid(mint, { fetchFn = fetch } = {}) {
   cache.set(mint, { at: Date.now(), value });
   return value;
 }
+
+/** Best Solana pair per mint (most liquidity), up to 30 mints per request. Returns Map mint -> snapshot. */
+export function bestPairs(pairs, mints) {
+  const want = new Set(mints);
+  const out = new Map();
+  for (const p of pairs ?? []) {
+    const mint = p?.baseToken?.address;
+    if (p?.chainId !== 'solana' || !want.has(mint) || !(Number(p.priceUsd) > 0)) continue;
+    const prev = out.get(mint);
+    if (prev && (prev.liqUsd ?? 0) >= (p.liquidity?.usd ?? 0)) continue;
+    const priceUsd = Number(p.priceUsd), mcUsd = p.marketCap ?? p.fdv ?? 0;
+    out.set(mint, {
+      mint, symbol: p.baseToken?.symbol ?? '', name: p.baseToken?.name ?? '', priceUsd, mcUsd,
+      supply: mcUsd && priceUsd ? mcUsd / priceUsd : 1e9, liqUsd: p.liquidity?.usd ?? 0, dexId: p.dexId ?? '',
+      onCurve: /pump\.?fun/i.test(p.dexId ?? '') && !/swap/i.test(p.dexId ?? ''), pairAddress: p.pairAddress ?? null,
+      pairCreatedAt: p.pairCreatedAt ?? null, volume: p.volume ?? {}, txns: p.txns ?? {}, priceChange: p.priceChange ?? {},
+      source: 'DexScreener',
+    });
+  }
+  return out;
+}
+
+export async function dexSnapshots(mints, { fetchFn = fetch } = {}) {
+  const out = new Map();
+  const list = [...new Set(mints)];
+  for (let i = 0; i < list.length; i += 30) {
+    const chunk = list.slice(i, i + 30);
+    const res = await fetchFn(`https://api.dexscreener.com/latest/dex/tokens/${chunk.join(',')}`,
+      { headers: { accept: 'application/json' }, signal: AbortSignal.timeout(10_000) });
+    if (!res.ok) throw new Error(`DexScreener HTTP ${res.status}`);
+    for (const [k, v] of bestPairs((await res.json()).pairs, chunk)) out.set(k, v);
+  }
+  return out;
+}

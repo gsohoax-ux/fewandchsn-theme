@@ -120,6 +120,12 @@ export const config = {
   paperMevPct: num('PAPER_MEV_PCT', 2),               // sandwich-bot losses on buys
   paperMaxFixedCostPct: num('PAPER_MAX_FIXED_COST_PCT', 5), // skip trades where network fees exceed this % of the trade
 
+  // Strategy section (System B, Setuh setups): its own paper budget, separate from PAPER_DAILY_USD.
+  // These are starting values; the Strategy screen can change them (saved in the database).
+  strategyEnabled: env('STRATEGY', '1') === '1',
+  strategyDailyUsd: num('STRATEGY_DAILY_USD', 50),
+  strategyPerTradeUsd: num('STRATEGY_PER_TRADE_USD', 10),
+
   // Market regime: when few coins are graduating, be pickier
   coldGradPct: num('COLD_GRAD_PCT', 0.4),            // 24h graduation rate below this % = cold market
   coldScoreBump: num('COLD_SCORE_BUMP', 5),          // extra score needed to alert in a cold market (fixed bar only)

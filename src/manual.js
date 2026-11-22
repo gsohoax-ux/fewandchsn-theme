@@ -1,17 +1,18 @@
 // Coin Check & Paper Trade: YOUR simulated positions on coins you pick yourself.
-// No real money and no wallet: positions are numbers in the bot's database.
+// No real money and no wallet: positions are numbers in the bot's database (book "manual").
 //
-// Prices update in real time from the bot's live Pump.fun feed (every trade), and from DexScreener
-// every 10 seconds for everything else. Values are shown honestly: "if sold now" includes trading
-// fees and the slippage your position size would cause in the current pool.
-import { liquidityRead, cashOut, curveVSolFromMc, priceImpact } from './liquidity.js';
+// Prices update from the bot's live Pump.fun feed (every trade) and from DexScreener every 10 seconds.
+// Stop-loss, take-profit and trailing stops run here on the server, so they work with the app closed.
+import { PaperBook } from './paperbook.js';
+import { dexSnapshots, bestPairs } from './dexscreener.js';
+import { curveVSolFromMc } from './liquidity.js';
 
 const B58 = /[1-9A-HJ-NP-Za-km-z]{32,44}/g;
 
-/** Pull a Solana address out of a pasted address or link (pump.fun, DexScreener, Padre, GMGN, ...). */
+/** Pull a Solana address out of a pasted address or link (pump.fun, DexScreener, Padre, Axiom, GMGN, ...). */
 export function extractAddress(input) {
   const s = String(input ?? '').trim();
-  if (!s) return null;
+  if (!s || s.length > 500) return null;
   if (/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(s)) return s;
   let path = s;
   try { const u = new URL(/^https?:\/\//i.test(s) ? s : `https://${s}`); path = `${u.pathname} ${u.search}`; } catch { /* not a URL */ }
@@ -20,24 +21,40 @@ export function extractAddress(input) {
   return found.find((a) => a.endsWith('pump')) ?? found.sort((a, b) => b.length - a.length)[0] ?? null;
 }
 
-const nowId = () => `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
-
 export class ManualPaper {
-  constructor({ store, cfg, engine = null, feed = null, chain = null, fetchFn = fetch, log = console }) {
+  constructor({ store, cfg, engine = null, feed = null, chain = null, fetchFn = fetch, log = console, now = () => Date.now() }) {
     Object.assign(this, { store, cfg, engine, feed, chain, fetchFn, log });
-    const saved = store.getKv('manualPaper') ?? {};
-    this.open = new Map((saved.open ?? []).map((p) => [p.id, p]));
-    this.closed = saved.closed ?? [];
+    this.book = new PaperBook({ store, cfg, book: 'manual', getSolUsd: () => this.solUsd, log, now });
+    this.#migrateOld();
     feed?.on?.('trade', (m) => this.onTrade(m));
   }
 
   get solUsd() { return this.engine?.solUsd ?? 0; }
-  #save() { this.store.setKv('manualPaper', { open: [...this.open.values()], closed: this.closed.slice(0, 200) }); }
+  get open() { return this.book.open; }
 
-  start() {
-    const loop = async () => { try { await this.poll(); } catch (e) { this.log.warn(`paper positions: ${e.message}`); } };
-    setInterval(loop, 10_000).unref?.();
-    loop();
+  /** Positions saved by the first version (kv "manualPaper") move into the book once. */
+  #migrateOld() {
+    const old = this.store.getKv('manualPaper');
+    if (!old?.open?.length) return;
+    for (const p of old.open) {
+      if (!(p.tokens > 0) || [...this.book.open.values()].some((x) => x.id === p.id)) continue;
+      const pos = { id: p.id, book: 'manual', origin: 'manual', status: 'open', mint: p.mint, symbol: p.symbol, name: p.name,
+        supply: p.supply || 1e9, onCurve: p.onCurve, vSol: p.vSol ?? null, liqUsd: p.liqUsd ?? null, priceUsd: p.priceUsd, mcUsd: p.mcUsd,
+        source: p.source, lastAt: p.lastAt, budgetUsd: p.budgetUsd, openedAt: p.openedAt, closedAt: null, exitReason: null, meta: {},
+        tokensInit: p.tokens, tokens: p.tokens, refPriceUsd: p.entryPriceUsd, entryPriceUsd: p.budgetUsd / p.tokens, entryMcUsd: p.entryMcUsd,
+        entrySlipPct: p.entrySlipPct ?? 0, depthKnown: true, realizedUsd: 0, soldCostUsd: 0, feesUsd: 0, slippageUsd: 0,
+        peakPriceUsd: p.peakPriceUsd ?? p.priceUsd, lowPriceUsd: p.lowPriceUsd ?? p.priceUsd, trailHighUsd: p.priceUsd,
+        history: p.history ?? [], fills: [], risk: {} };
+      this.book.open.set(pos.id, pos);
+      this.store.saveSimPosition('manual', pos);
+    }
+    this.store.setKv('manualPaper', { migrated: true, open: [], closed: old.closed ?? [] });
+  }
+
+  start(health = null) {
+    const loop = () => this.poll();
+    if (health) health.job('Manual positions: prices + exits', loop, 10_000);
+    else { setInterval(() => loop().catch((e) => this.log.warn(`paper positions: ${e.message}`)), 10_000).unref?.(); loop().catch(() => {}); }
   }
 
   async #json(url) {
@@ -50,7 +67,7 @@ export class ManualPaper {
   async resolve(input) {
     const addr = extractAddress(input);
     if (!addr) throw new Error('No Solana address found in that text or link');
-    // Is it a token mint? Ask the chain if we can, otherwise DexScreener
+    if (this.engine?.coins.has(addr)) return addr;
     if (this.chain?.enabled) {
       try {
         const r = await this.chain.rpc('getAccountInfo', [addr, { encoding: 'jsonParsed' }]);
@@ -78,134 +95,63 @@ export class ManualPaper {
         onCurve: true, vSol: c.vSol, liqUsd: null, source: 'live feed' };
     }
     const t = await this.#json(`https://api.dexscreener.com/latest/dex/tokens/${mint}`);
-    const p = (t.pairs ?? []).filter((x) => x.chainId === 'solana' && x.baseToken?.address === mint)
-      .sort((a, b) => (b.liquidity?.usd ?? 0) - (a.liquidity?.usd ?? 0))[0];
-    if (!p || !(Number(p.priceUsd) > 0)) throw new Error('No price found for this coin yet (it may be too new for DexScreener)');
-    const priceUsd = Number(p.priceUsd), mcUsd = p.marketCap ?? p.fdv ?? 0;
-    const onCurve = /pump\.?fun/i.test(p.dexId ?? '') && !/swap/i.test(p.dexId ?? '');
-    return { mint, symbol: p.baseToken?.symbol ?? '', name: p.baseToken?.name ?? '', priceUsd, mcUsd,
-      supply: mcUsd && priceUsd ? mcUsd / priceUsd : 1e9, onCurve, vSol: null, liqUsd: p.liquidity?.usd ?? 0, source: 'DexScreener' };
+    const s = bestPairs(t.pairs, [mint]).get(mint);
+    if (!s) throw new Error('No price found for this coin yet (it may be too new for DexScreener)');
+    return { ...s, vSol: s.onCurve && solUsd > 0 && s.mcUsd ? curveVSolFromMc(s.mcUsd / solUsd) : null };
   }
 
-  /** Pool depth in $ (null = unknown, 0 = no pool to trade against). */
-  #depth(pos) {
-    const L = liquidityRead({ onCurve: pos.onCurve, vSol: pos.vSol, liqUsd: pos.liqUsd ?? 0, mcUsd: pos.mcUsd, solUsd: this.solUsd,
-      orderUsd: pos.budgetUsd });
-    return L ? L.depthUsd : null;
-  }
-
-  #feePct() { return (this.cfg.paperFeePct ?? 1.25) + (this.cfg.paperTerminalFeePct ?? 1); }
-  #txUsd() { return (this.cfg.paperTxFeeSol ?? 0.0015) * (this.solUsd || 150); }
-
-  /** Start a simulated position with `budgetUsd` (fees and entry slippage are taken off up front). */
-  async openPosition({ mint, budgetUsd }) {
-    budgetUsd = Number(budgetUsd);
-    if (!(budgetUsd >= 1 && budgetUsd <= 1_000_000)) throw new Error('Budget must be between $1 and $1,000,000');
+  /** Start a simulated position with `budgetUsd`; risk = optional stop/target/trail. */
+  async openPosition({ mint, budgetUsd, risk = {}, requestId = null }) {
     const snap = await this.snapshot(mint);
-    const pos = { id: nowId(), ...snap, budgetUsd, openedAt: Date.now(), entryPriceUsd: snap.priceUsd, entryMcUsd: snap.mcUsd, history: [] };
-    const depth = this.#depth(pos);
-    if (depth === 0) throw new Error('This coin has no liquidity pool to trade against, so a buy (or a later sale) would not fill');
-    // average slippage for this order size against the pool, plus sandwich-bot losses on buys
-    const slipPct = (depth ? priceImpact(budgetUsd, depth).avgPct : 0) + (this.cfg.paperMevPct ?? 2);
-    const spendable = Math.max(0, budgetUsd - this.#txUsd()) * (1 - this.#feePct() / 100);
-    pos.tokens = (spendable / snap.priceUsd) / (1 + slipPct / 100);
-    pos.entrySlipPct = slipPct;
-    pos.depthKnown = depth != null;
-    Object.assign(pos, { priceUsd: snap.priceUsd, mcUsd: snap.mcUsd, lastAt: Date.now(), peakPriceUsd: snap.priceUsd, lowPriceUsd: snap.priceUsd });
-    pos.history.push([pos.lastAt, snap.priceUsd]);
-    this.open.set(pos.id, pos);
+    const pos = this.book.openPosition({ snap, budgetUsd, origin: 'manual', risk, idemKey: requestId ? `manual:${requestId}` : null });
     if (snap.onCurve && this.feed && !this.feed.watched?.has(mint)) this.feed.watch?.(mint);
-    this.#save();
-    return this.#view(pos);
+    return this.book.view(pos);
   }
 
-  /** Lock in the simulated result at the current "if sold now" value. */
-  closePosition(id) {
-    const pos = this.open.get(id);
-    if (!pos) throw new Error('Position not found');
-    const v = this.#value(pos);
-    this.open.delete(id);
-    this.closed.unshift({ id, mint: pos.mint, symbol: pos.symbol, name: pos.name, budgetUsd: pos.budgetUsd, openedAt: pos.openedAt,
-      closedAt: Date.now(), exitUsd: v.ifSoldUsd, pnlUsd: v.ifSoldUsd - pos.budgetUsd, pnlPct: (v.ifSoldUsd / pos.budgetUsd - 1) * 100,
-      entryMcUsd: pos.entryMcUsd, exitMcUsd: pos.mcUsd });
-    this.#save();
-    return this.closed[0];
+  sell(id, pct, requestId = null) {
+    const r = this.book.sell(id, pct, { reason: `Manual sell ${pct}%`, idemKey: requestId ? `manual:${id}:${requestId}` : null });
+    return { duplicate: r.duplicate, position: this.book.view(r.position) };
   }
 
-  /** Live trades from the bot's Pump.fun feed: instant price updates for curve coins. */
+  setRisk(id, risk) { return this.book.view(this.book.setRisk(id, risk)); }
+
+  /** Sell everything at the current "if sold now" value. */
+  closePosition(id, requestId = null) {
+    const r = this.book.sell(id, 100, { reason: 'Closed manually', idemKey: requestId ? `manual:${id}:${requestId}` : null });
+    const v = this.book.view(r.position);
+    return { ...v, exitUsd: v.proceedsUsd };
+  }
+
+  /** Live trades from the bot's Pump.fun feed: instant price updates (and exits) for curve coins. */
   onTrade(msg) {
     const solUsd = this.solUsd;
     if (!(solUsd > 0) || msg.marketCapSol == null) return;
-    for (const pos of this.open.values()) {
-      if (pos.mint !== msg.mint || !pos.onCurve) continue;
-      const mcUsd = Number(msg.marketCapSol) * solUsd;
-      this.#update(pos, { priceUsd: mcUsd / (pos.supply || 1e9), mcUsd, vSol: msg.vSolInBondingCurve != null ? Number(msg.vSolInBondingCurve) : pos.vSol, source: 'live feed' });
-    }
+    if (![...this.book.open.values()].some((p) => p.mint === msg.mint && p.onCurve)) return;
+    const mcUsd = Number(msg.marketCapSol) * solUsd;
+    this.book.updatePrice(msg.mint, { priceUsd: mcUsd / 1e9, mcUsd, vSol: msg.vSolInBondingCurve != null ? Number(msg.vSolInBondingCurve) : null, source: 'live feed' });
   }
 
-  #update(pos, { priceUsd, mcUsd, vSol, liqUsd, onCurve, source }) {
-    if (!(priceUsd > 0)) return;
-    Object.assign(pos, { priceUsd, mcUsd, lastAt: Date.now(), source });
-    if (vSol != null) pos.vSol = vSol;
-    if (liqUsd != null) pos.liqUsd = liqUsd;
-    if (onCurve != null) pos.onCurve = onCurve;
-    pos.peakPriceUsd = Math.max(pos.peakPriceUsd ?? priceUsd, priceUsd);
-    pos.lowPriceUsd = Math.min(pos.lowPriceUsd ?? priceUsd, priceUsd);
-    const last = pos.history.at(-1);
-    if (!last || pos.lastAt - last[0] >= 5_000) { pos.history.push([pos.lastAt, priceUsd]); if (pos.history.length > 360) pos.history.shift(); }
-  }
-
-  /** DexScreener refresh for every open position (one request for up to 30 coins). */
+  /** DexScreener refresh for open positions not covered by the live feed in the last 30 s, then time rules. */
   async poll() {
-    const all = [...this.open.values()];
-    // keep the live feed subscribed for curve coins (the bot may have stopped tracking them)
+    const all = [...this.book.open.values()];
     for (const p of all) if (p.onCurve && this.feed && !this.feed.watched?.has(p.mint)) this.feed.watch?.(p.mint);
-    const mints = [...new Set(all.filter((p) => !(p.source === 'live feed' && Date.now() - p.lastAt < 30_000)).map((p) => p.mint))];
-    for (let i = 0; i < mints.length; i += 30) {
-      const t = await this.#json(`https://api.dexscreener.com/latest/dex/tokens/${mints.slice(i, i + 30).join(',')}`).catch(() => null);
-      for (const p of t?.pairs ?? []) {
-        if (p.chainId !== 'solana') continue;
-        for (const pos of this.open.values()) {
-          if (pos.mint !== p.baseToken?.address) continue;
-          const better = !pos._pair || pos._pair === p.pairAddress || (p.liquidity?.usd ?? 0) > (pos.liqUsd ?? 0);
-          if (!better) continue;
-          pos._pair = p.pairAddress;
-          const onCurve = /pump\.?fun/i.test(p.dexId ?? '') && !/swap/i.test(p.dexId ?? '');
-          this.#update(pos, { priceUsd: Number(p.priceUsd), mcUsd: p.marketCap ?? p.fdv ?? pos.mcUsd, liqUsd: p.liquidity?.usd ?? 0,
-            onCurve, vSol: onCurve && this.solUsd > 0 && p.marketCap ? curveVSolFromMc(p.marketCap / this.solUsd) : null, source: 'DexScreener' });
-        }
+    const now = Date.now();
+    const mints = all.filter((p) => !(p.source === 'live feed' && now - p.lastAt < 30_000)).map((p) => p.mint);
+    if (mints.length) {
+      const snaps = await dexSnapshots(mints, { fetchFn: this.fetchFn });
+      for (const [mint, s] of snaps) {
+        this.book.updatePrice(mint, { priceUsd: s.priceUsd, mcUsd: s.mcUsd, liqUsd: s.liqUsd, onCurve: s.onCurve,
+          vSol: s.onCurve && this.solUsd > 0 && s.mcUsd ? curveVSolFromMc(s.mcUsd / this.solUsd) : null, source: 'DexScreener' });
       }
     }
-    if (all.length) this.#save();
-  }
-
-  /** Market value, and what selling everything now would really bring after fees and slippage. */
-  #value(pos) {
-    const marketUsd = pos.tokens * pos.priceUsd;
-    const depth = this.#depth(pos);
-    // unknown depth: no slippage estimate; no pool at all: nothing can be sold
-    const slip = depth == null ? 0 : cashOut(marketUsd, depth).lossPct;
-    const ifSoldUsd = Math.max(0, marketUsd * (1 - slip / 100) * (1 - this.#feePct() / 100) - this.#txUsd());
-    return { marketUsd, ifSoldUsd, exitSlipPct: slip };
-  }
-
-  #view(pos) {
-    const v = this.#value(pos);
-    return {
-      id: pos.id, mint: pos.mint, symbol: pos.symbol, name: pos.name, budgetUsd: pos.budgetUsd, openedAt: pos.openedAt,
-      entryPriceUsd: pos.entryPriceUsd, entryMcUsd: pos.entryMcUsd, priceUsd: pos.priceUsd, mcUsd: pos.mcUsd,
-      priceChangePct: (pos.priceUsd / pos.entryPriceUsd - 1) * 100, marketUsd: v.marketUsd, ifSoldUsd: v.ifSoldUsd,
-      pnlUsd: v.ifSoldUsd - pos.budgetUsd, pnlPct: (v.ifSoldUsd / pos.budgetUsd - 1) * 100, exitSlipPct: v.exitSlipPct,
-      entrySlipPct: pos.entrySlipPct, depthUsd: this.#depth(pos), onCurve: pos.onCurve, liqUsd: pos.liqUsd, source: pos.source, lastAt: pos.lastAt,
-      history: pos.history.slice(-120).map(([, p]) => p),
-    };
+    this.book.tick();
   }
 
   view() {
-    const open = [...this.open.values()].map((p) => this.#view(p)).sort((a, b) => b.openedAt - a.openedAt);
-    const invested = open.reduce((s, p) => s + p.budgetUsd, 0), now = open.reduce((s, p) => s + p.ifSoldUsd, 0);
-    const realized = this.closed.reduce((s, c) => s + c.pnlUsd, 0);
-    return { open, closed: this.closed.slice(0, 20),
-      totals: { invested, value: now, pnlUsd: now - invested, pnlPct: invested ? (now / invested - 1) * 100 : 0, realizedUsd: realized, closedCount: this.closed.length } };
+    const open = this.book.openViews();
+    const closed = this.book.closedViews(100);
+    const s = this.book.summary(closed, open);
+    return { open, closed: closed.slice(0, 50).map((c) => ({ ...c, exitUsd: c.proceedsUsd })),
+      totals: s };
   }
 }

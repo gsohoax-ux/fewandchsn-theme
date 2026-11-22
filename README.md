@@ -180,26 +180,65 @@ multiple as a likely outcome.
 Needs the Helius key for the on-chain parts. Results are cached for 2 minutes. A clean check lowers the risk
 but can't rule out a rug, since devs can still sell.
 
+### 🗂 The app: three sections
+
+The dashboard is organized like a trading terminal: a sidebar on computers and a bottom bar on phones. Paste any
+address or link into the search bar at the top to jump straight to Coin Check.
+
+| Section | What's in it |
+|---|---|
+| **Dashboard** | **Overview**: headline numbers, live discovery board (New Pairs / In between / Final Stretch), runner detection, 5-minute movers, live ranking, automatic paper trading, alerts, Why they died. **Trends**: confirmed narratives with sources, velocity, AI thesis and coin ideas, viral X posts, Pump.fun themes. **Learning Center**: past outcomes by stage, score, narrative and safety, learned signals, market condition, strategy observations. **System Health**: every service and outside API, background jobs, database, Desk, Logger and audit log. |
+| **Strategy** | The Setuh scalping setups with their own paper trading (see below). |
+| **Coin Check & Paper Trade** | Research one coin, watch its live chart, and manage your own simulated positions. |
+
+### 📐 Strategy (Setuh setups, separate paper trading)
+
+Five setups, each with every rule shown as met (✓), failed (✕) or not yet confirmed (?), plus the entry, the
+invalidation level and why, the target, and reward vs risk:
+
+- **New Pairs · Launch pullback:** never chases the launch pump. The coin must have run 2.5x+ first (e.g. $2K → $7.5K),
+  pulled back 45–65% to a floor that holds, with buyers stepping back in. Target +55%, stop −20% or just under the floor.
+- **Final Stretch A · 60% bundle pullback:** a run toward $18–20K, bundle / tracked wallets sell, a ~60% retrace to a floor,
+  sellers exhausted, demand back.
+- **Final Stretch B · 40–50% pullback:** only coins whose high was above $15K; a meaningful high, a 40–50% retrace that
+  stabilizes, buying confirmation.
+- **Final Stretch C · Tracked developer:** devs with graduated coins and no rugs (or wallets you add as "follow"); blocked
+  devs excluded. Waits for selling to exhaust, a sideways range, then a breakout.
+- **Migrated Coins:** graduates 1–3 h old, 60–70% off a $100K+ high, a sideways floor around $20–50K that holds, and a
+  breakout on volume. A drop alone is never an entry.
+
+This is **System B**: its own daily budget (`STRATEGY_DAILY_USD`, default $50, `STRATEGY_PER_TRADE_USD` $10), positions,
+history and statistics. It never touches the automatic paper trader (System A, the $30/day budget that follows
+alerts) or your manual positions. **Performance** shows, per setup: detected, valid, rejected, entries, completed,
+win rate, average win and loss, profit factor, max drawdown, average hold, fees and slippage, and results by market
+condition. Every rule can be changed per setup in **Rules & settings** without affecting the others, and each setup
+can be switched off. Migrated-coin candles come from GeckoTerminal's free API, so that setup scans a few coins a
+minute.
+
 ### 🧪 Coin Check & Paper Trade (your own simulated trades)
 
-The dashboard has two tabs. **📊 Dashboard** is everything the bot already did, unchanged. **🧪 Coin Check & Paper
-Trade** is for coins you pick yourself:
-
 1. **Check a coin.** Paste a contract address **or a link** (pump.fun, DexScreener, Padre, Axiom, GMGN, Birdeye,
-   Solscan). Links to a trading pair are looked up to find the coin. The full deep check runs, and the
-   red flags are shown first: **ownership concentration**, **mint / freeze authority**, **liquidity** and
-   **honeypot & taxes**. Every other check is listed underneath. It is **not a guarantee of safety**.
-2. **Start a paper position.** Choose a budget ($10 / $30 / $50 / $100 or any amount). Before you start, it shows
-   liquidity vs market cap (low = HIGH RISK), the slippage your size would pay, honeypot and tax signs,
-   concentrated holdings, and how much of a paper gain a thin pool would let you cash out.
-3. **Watch it live.** Every open position shows price and market cap now vs entry, **value if sold now** and
-   **gain / loss in $ and %**. The page refreshes every 2 seconds. Pump.fun coins update on every trade from the
-   live feed, and other coins update from DexScreener every 10 seconds. Close a position anytime to lock in the
-   simulated result. Positions survive restarts.
+   Solscan). Links to a trading pair are looked up to find the coin. Every deep-check test runs, and the red flags come
+   first: **ownership concentration**, **mint / freeze authority**, **liquidity** and **honeypot & taxes**.
+   Developer, socials, market and the RugCheck second opinion are listed underneath. It is **not a guarantee of safety**.
+2. **Large live chart.** Real candles with volume for 1m / 5m / 15m / 1h / 4h / 1d, in price or market cap, with
+   price, market cap, liquidity (and its % of market cap), change, high/low, volume and buy/sell counts. Coins the bot
+   watched from launch use every trade from its live feed; others use GeckoTerminal. Stale or missing data is marked,
+   never filled in. Your entry, stop, target and trailing stop are drawn on the chart.
+3. **Start a paper position.** Choose a budget and, optionally, a **stop-loss** (% or exact price), a **take-profit**
+   (% or exact price, and how much to sell there) and a **trailing stop** (%; it only moves up). The expected loss and
+   profit in $ are shown first, along with liquidity vs market cap, slippage for your size, honeypot and tax signs,
+   concentration, and how much of a paper gain a thin pool would let you cash out.
+4. **Manage it.** Each position shows entry and current price, investment, value if sold now, tokens left, realized
+   and unrealized P&L in $ and %, hold time, and fees. **SELL 25% / 50% / 75% / 100%** or a custom %; selling 100%
+   asks first. Stops and targets can be edited or switched off anytime.
+5. **Trade history** lists every completed position: entry, average exit, quantity, duration, P&L, fees and slippage,
+   exit reason, and whether it was manual or a strategy trade.
 
-"Value if sold now" is honest: it takes off trading fees (Pump.fun + terminal), network fees, and the slippage
-selling your whole position would cause in today's pool. A new position therefore starts a few % red. That's the
-real round-trip cost. **No real money and no wallet are involved.** Nothing is ever bought or sold.
+Stops, targets and trailing stops run **on the server**, so they work with the app closed. Every sell has a unique
+key, so a double tap or a repeated trigger can never sell twice. "Value if sold now" takes off trading fees, the
+network fee and the slippage selling your whole position would cause in today's pool, so a new position starts a few
+% red. **No real money and no wallet are involved.**
 
 ### 🔎 Finding the best coins every day
 
@@ -436,10 +475,17 @@ src/engine.js     when to score, alerts, follow-up warnings
 src/confidence.js confidence meter
 src/xwatch.js     X watcher: viral/meme-able posts, matching coins to posts
 src/notify.js     phone alerts (ntfy) + optional Telegram (src/telegram.js)
-src/server.js     dashboard server; public/index.html is the page (two tabs)
+src/server.js     HTTP API + login; serves public/index.html and public/app/*.js (the three sections)
 src/deepcheck.js  deep check of any coin
-src/manual.js     Coin Check & Paper Trade: your simulated positions, live prices
-src/store.js      SQLite history (dev launches, socials, alert outcomes)
+src/manual.js     Coin Check & Paper Trade: coin lookup, your simulated positions
+src/paperbook.js  simulated positions: stop-loss, take-profit, trailing stop, partial sells, P&L, history
+src/candles.js    chart candles: the bot's live trades + GeckoTerminal OHLCV
+src/strategy/     Setuh setups (setups.js, pure rules) and their own paper engine (engine.js)
+src/paper.js      automatic paper trading that follows alerts (System A)
+src/health.js     API health, background jobs, database health
+src/analytics.js  dashboard headline numbers
+src/store.js      SQLite history (launches, alerts, learning samples, simulated positions, signals, audit log)
+docs/ARCHITECTURE.md  feature inventory, service map and the two paper-trading systems
 ```
 
 *Not financial advice. Meme coins are extremely risky. Only trade what you can afford to lose.*

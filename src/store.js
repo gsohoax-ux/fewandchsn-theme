@@ -7,6 +7,7 @@ import { dirname } from 'node:path';
 export class Store {
   constructor(path) {
     if (path !== ':memory:') mkdirSync(dirname(path), { recursive: true });
+    this.path = path;
     this.db = new DatabaseSync(path);
     this.db.exec(`
       PRAGMA journal_mode = WAL;
@@ -28,6 +29,23 @@ export class Store {
       CREATE TABLE IF NOT EXISTS paper_trades (
         mint TEXT, symbol TEXT, opened_at INTEGER, closed_at INTEGER, cost_sol REAL, proceeds_sol REAL,
         why TEXT, stage TEXT, score INTEGER, entry_mc REAL, exit_mc REAL);
+      -- Simulated positions for the manual book and the strategy book (never the automatic System A)
+      CREATE TABLE IF NOT EXISTS sim_positions (
+        id TEXT PRIMARY KEY, book TEXT NOT NULL, mint TEXT NOT NULL, status TEXT NOT NULL,
+        opened_at INTEGER, closed_at INTEGER, data TEXT NOT NULL);
+      CREATE INDEX IF NOT EXISTS sim_positions_book ON sim_positions(book, status);
+      CREATE TABLE IF NOT EXISTS sim_fills (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, book TEXT NOT NULL, position_id TEXT NOT NULL, idem_key TEXT UNIQUE,
+        at INTEGER, kind TEXT, reason TEXT, pct REAL, tokens REAL, price_usd REAL, gross_usd REAL,
+        fees_usd REAL, slippage_usd REAL, net_usd REAL, mc_usd REAL);
+      CREATE INDEX IF NOT EXISTS sim_fills_pos ON sim_fills(position_id);
+      CREATE TABLE IF NOT EXISTS strategy_signals (
+        id TEXT PRIMARY KEY, setup TEXT, mint TEXT, symbol TEXT, at INTEGER, status TEXT, regime TEXT, data TEXT);
+      CREATE INDEX IF NOT EXISTS strategy_signals_at ON strategy_signals(at);
+      CREATE INDEX IF NOT EXISTS strategy_signals_setup ON strategy_signals(setup, mint, at);
+      CREATE TABLE IF NOT EXISTS audit_log (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, at INTEGER, actor TEXT, book TEXT, action TEXT, detail TEXT);
+      CREATE INDEX IF NOT EXISTS audit_log_at ON audit_log(at);
     `);
     // Older databases: add the launch-outcome columns used for "dev rugged before"
     const cols = new Set(this.db.prepare('PRAGMA table_info(launches)').all().map((c) => c.name));
@@ -78,6 +96,20 @@ export class Store {
       paperSince: q(`SELECT * FROM paper_trades WHERE closed_at >= ?`),
       getKv: q(`SELECT v FROM kv WHERE k = ?`),
       setKv: q(`INSERT OR REPLACE INTO kv VALUES (?, ?)`),
+      simUpsert: q(`INSERT INTO sim_positions (id, book, mint, status, opened_at, closed_at, data) VALUES (?,?,?,?,?,?,?)
+                    ON CONFLICT(id) DO UPDATE SET status = excluded.status, closed_at = excluded.closed_at, data = excluded.data`),
+      simByBook: q(`SELECT data FROM sim_positions WHERE book = ? AND status = ? ORDER BY opened_at DESC LIMIT ?`),
+      simFill: q(`INSERT OR IGNORE INTO sim_fills (book, position_id, idem_key, at, kind, reason, pct, tokens, price_usd, gross_usd,
+                  fees_usd, slippage_usd, net_usd, mc_usd) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`),
+      simFillsFor: q(`SELECT * FROM sim_fills WHERE position_id = ? ORDER BY at`),
+      sigUpsert: q(`INSERT INTO strategy_signals (id, setup, mint, symbol, at, status, regime, data) VALUES (?,?,?,?,?,?,?,?)
+                    ON CONFLICT(id) DO UPDATE SET status = excluded.status, data = excluded.data`),
+      sigRecent: q(`SELECT * FROM strategy_signals ORDER BY at DESC LIMIT ?`),
+      sigCounts: q(`SELECT setup, status, COUNT(*) n FROM strategy_signals WHERE at >= ? GROUP BY setup, status`),
+      audit: q(`INSERT INTO audit_log (at, actor, book, action, detail) VALUES (?,?,?,?,?)`),
+      auditRecent: q(`SELECT * FROM audit_log ORDER BY id DESC LIMIT ?`),
+      pruneAudit: q(`DELETE FROM audit_log WHERE at < ?`),
+      pruneSignals: q(`DELETE FROM strategy_signals WHERE at < ? AND status IN ('watch', 'rejected')`),
       similar: q(`SELECT COUNT(*) n, SUM(CASE WHEN peak_mc_sol >= 1.5 * mc_sol THEN 1 ELSE 0 END) hits
                   FROM alerts WHERE score BETWEEN ? AND ? AND at BETWEEN ? AND ?`),
     };
@@ -178,7 +210,77 @@ export class Store {
   getModel() { try { return JSON.parse(this.s.getKv.get('model')?.v ?? 'null'); } catch { return null; } }
   saveModel(m) { this.s.setKv.run('model', JSON.stringify(m)); }
 
+  // ---- simulated positions (manual + strategy books) ----
+  saveSimPosition(book, pos) {
+    this.s.simUpsert.run(pos.id, book, pos.mint, pos.status, pos.openedAt ?? null, pos.closedAt ?? null, JSON.stringify(pos));
+  }
+  simPositions(book, status, limit = 500) {
+    return this.s.simByBook.all(book, status, limit).map((r) => { try { return JSON.parse(r.data); } catch { return null; } }).filter(Boolean);
+  }
+  /** Records a fill once. Returns false if a fill with the same idempotency key already exists. */
+  addSimFill(book, f) {
+    const r = this.s.simFill.run(book, f.positionId, f.idemKey ?? null, f.at, f.kind, f.reason ?? '', f.pct ?? null, f.tokens ?? null,
+      f.priceUsd ?? null, f.grossUsd ?? null, f.feesUsd ?? null, f.slippageUsd ?? null, f.netUsd ?? null, f.mcUsd ?? null);
+    return r.changes > 0;
+  }
+  simFills(positionId) { return this.s.simFillsFor.all(positionId); }
+
+  // ---- strategy signals ----
+  saveSignal(sig) {
+    this.s.sigUpsert.run(sig.id, sig.setup, sig.mint, sig.symbol ?? '', sig.at, sig.status, sig.regime ?? null, JSON.stringify(sig));
+  }
+  recentSignals(limit = 100) {
+    return this.s.sigRecent.all(limit).map((r) => { try { return { ...JSON.parse(r.data), status: r.status }; } catch { return null; } }).filter(Boolean);
+  }
+  signalCounts(sinceMs = 0) { return this.s.sigCounts.all(sinceMs); }
+
+  // ---- audit log ----
+  audit(actor, book, action, detail = {}) {
+    try { this.s.audit.run(Date.now(), actor, book ?? '', action, JSON.stringify(detail)); } catch { /* never block on the audit log */ }
+  }
+  recentAudit(limit = 100) {
+    return this.s.auditRecent.all(limit).map((r) => ({ ...r, detail: (() => { try { return JSON.parse(r.detail); } catch { return r.detail; } })() }));
+  }
+
+  /**
+   * Learning Center: what actually happened to scored coins (finished 2-hour windows only).
+   * Grouped by stage, by score band, and by narrative band. Past results, not predictions.
+   */
+  learningReport(target = 1.5) {
+    if (this.lrCache && Date.now() - this.lrCache.at < 5 * 60_000) return this.lrCache.val;
+    const rows = this.s.doneSamples.all(20000).filter((r) => r.mc_sol > 0);
+    const summarize = (list) => {
+      if (!list.length) return { n: 0 };
+      const peaks = list.map((r) => r.peak_mc_sol / r.mc_sol).sort((a, b) => a - b);
+      return { n: list.length, hitTarget: Math.round((peaks.filter((p) => p >= target).length / list.length) * 100),
+        hit2: Math.round((peaks.filter((p) => p >= 2).length / list.length) * 100),
+        graduated: Math.round((list.filter((r) => r.migrated).length / list.length) * 100),
+        medianPeakPct: Math.round((peaks[Math.floor(peaks.length / 2)] - 1) * 100) };
+    };
+    const group = (keyFn) => {
+      const m = new Map();
+      for (const r of rows) { const k = keyFn(r); if (k == null) continue; if (!m.has(k)) m.set(k, []); m.get(k).push(r); }
+      return [...m.entries()].map(([key, list]) => ({ key, ...summarize(list) }));
+    };
+    const feat = (r, i) => { try { return JSON.parse(r.features)[i]; } catch { return null; } };
+    const band = (x) => (x == null ? null : x >= 80 ? '80+' : x >= 65 ? '65–79' : x >= 50 ? '50–64' : 'under 50');
+    const order = ['80+', '65–79', '50–64', 'under 50'];
+    const byOrder = (a, b) => order.indexOf(a.key) - order.indexOf(b.key);
+    const val = {
+      target, overall: summarize(rows),
+      byStage: group((r) => r.stage).sort((a, b) => b.n - a.n),
+      byScore: group((r) => band(r.score)).sort(byOrder),
+      byNarrative: group((r) => { const f = feat(r, 1); return f == null ? null : band(f * 100); }).sort(byOrder),
+      bySafety: group((r) => { const f = feat(r, 0); return f == null ? null : band(f * 100); }).sort(byOrder),
+      firstAt: rows.length ? Math.min(...rows.map((r) => r.at)) : null,
+    };
+    this.lrCache = { at: Date.now(), val };
+    return val;
+  }
+
   pruneOld(days = 14) {
+    this.s.pruneAudit.run(Date.now() - 90 * 86400_000);
+    this.s.pruneSignals.run(Date.now() - 14 * 86400_000);
     this.s.prune.run(Date.now() - days * 86400_000);
     this.s.pruneSamples.run(Date.now() - 60 * 86400_000);
   }

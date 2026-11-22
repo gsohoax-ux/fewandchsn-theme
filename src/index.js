@@ -15,6 +15,13 @@ import { PaperTrader } from './paper.js';
 import { TrendScanner } from './trends.js';
 import { DeepChecker } from './deepcheck.js';
 import { ManualPaper } from './manual.js';
+import { Health } from './health.js';
+import { CandleService } from './candles.js';
+import { StrategyEngine } from './strategy/engine.js';
+
+// Health monitor first: every outbound request from here on is counted by provider
+const health = new Health();
+globalThis.fetch = health.instrument(globalThis.fetch.bind(globalThis));
 
 const ts = () => new Date().toISOString().slice(11, 19);
 const log = {
@@ -84,10 +91,18 @@ log.info(`  Phone alerts (ntfy): ${ntfy.enabled ? `on - in the ntfy app, subscri
 if (telegram.enabled) log.info(`  Telegram: ${cfg.telegramChatId ? 'on' : 'token set - send /chatid to your bot to get your chat id'}`);
 
 engine.start();
+// background-loop heartbeat for System Health (the engine schedules its own loop)
+const engineTick = engine.tick.bind(engine);
+engine.tick = (now) => { try { engineTick(now); health.beat('Engine: discovery & scoring loop', 2000); } catch (e) { health.beat('Engine: discovery & scoring loop', 2000, false, e.message); throw e; } };
 const deepcheck = new DeepChecker({ chain: cfg.demo ? null : chain, store, cfg, engine, log });
 // Coin Check & Paper Trade: your own simulated positions (no real money, no wallet)
 const manual = new ManualPaper({ store, cfg, engine, feed, chain: cfg.demo ? null : chain, log });
-manual.start();
-startServer({ engine, store, cfg, deepcheck, manual, log });
+manual.start(health);
+// Charts: GeckoTerminal OHLCV + candles from the bot's own live trades
+const candles = new CandleService({ engine, log });
+// Strategy section (System B): Setuh setups with their own paper book and budget
+const strategy = cfg.strategyEnabled ? new StrategyEngine({ cfg, engine, store, feed, candles, log }) : null;
+strategy?.start(health);
+startServer({ engine, store, cfg, deepcheck, manual, strategy, candles, health, paper, trends, log });
 telegram.poll();
 notifier.info(`🤖 Memecoin bot is running${cfg.demo ? ' (DEMO - fake coins)' : ''}. You'll get alerts here.`);
